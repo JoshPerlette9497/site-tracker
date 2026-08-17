@@ -119,6 +119,7 @@ async function loadAll(){
   }
   await migrateUnitNames();
   await migrateRoundsFields();
+  await migrateDefIds();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -160,6 +161,13 @@ async function migrateRoundsFields(){
   }
   if(changed) await sset('units', state.units);
   await sset('migrated_rounds_v1', true);
+}
+async function migrateDefIds(){
+  let changed = false;
+  for(const d of state.defs){
+    if(!d.id){ d.id = uid(); changed = true; }
+  }
+  if(changed) await sset('defs', state.defs);
 }
 
 function makeGroupInstance(unitId, groupId){

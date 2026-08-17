@@ -149,6 +149,7 @@ function wireCardActions(){
   document.querySelectorAll('.defact-done').forEach(b=>b.onclick=async(e)=>{
     const id = e.target.closest('[data-def]').dataset.def;
     const d = state.defs.find(x=>x.id===id);
+    if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
     d.status='Done'; d.completedDate=todayISO();
     await sset('defs', state.defs); render();
   });
@@ -351,6 +352,7 @@ function openUnitDetail(unitId){
   document.querySelectorAll('.ud-def-done').forEach(b=>b.onclick=async(e)=>{
     const id = e.target.closest('[data-uddef]').dataset.uddef;
     const d2 = state.defs.find(d=>d.id===id);
+    if(!d2){ showToast('Could not find that deficiency — try reloading.'); return; }
     d2.status='Done'; d2.completedDate=todayISO();
     await sset('defs', state.defs);
     closeModal();
@@ -533,6 +535,7 @@ function wireDefRowActions(){
   document.querySelectorAll('.def2-done').forEach(b=>b.onclick=async(e)=>{
     const id = e.target.closest('[data-def2]').dataset.def2;
     const d2 = state.defs.find(d=>d.id===id);
+    if(!d2){ showToast('Could not find that deficiency — try reloading.'); return; }
     d2.status='Done'; d2.completedDate=todayISO();
     await sset('defs', state.defs); render();
   });
