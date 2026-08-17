@@ -8,6 +8,7 @@ function setHeader(){
 }
 
 function render(){
+  const scrollY = window.scrollY;
   if(activeTab==='today') renderToday();
   else if(activeTab==='brief') renderBrief();
   else if(activeTab==='units') renderUnits();
@@ -16,6 +17,7 @@ function render(){
   else if(activeTab==='log') renderLog();
   else if(activeTab==='schedule') renderSchedule();
   else if(activeTab==='sync') renderSync();
+  window.scrollTo(0, scrollY);
 }
 
 function renderBrief(){
@@ -350,6 +352,8 @@ function renderPhaseGroupRow(row){
 }
 
 function openUnitDetail(unitId){
+  const prevModal = document.querySelector('.modal');
+  const prevScrollTop = prevModal ? prevModal.scrollTop : 0;
   const u = state.units.find(x=>x.id===unitId);
   const insts = state.instances.filter(i=>i.unitId===unitId);
   const defs = state.defs.filter(d=>d.location===u.name && d.status!=='Done');
@@ -446,6 +450,8 @@ function openUnitDetail(unitId){
       </div><span class="stamp ${st}">${st}</span></div></div>`;
   }
   showModal(html);
+  const newModal = document.querySelector('.modal');
+  if(newModal) newModal.scrollTop = prevScrollTop;
   document.getElementById('logRoundBtn').onclick = ()=>openRoundModal(unitId);
   document.getElementById('editWalkBtn').onclick = ()=>openEditWalkModal(unitId);
   document.querySelectorAll('.pcg-toggle').forEach(el=>el.onclick=()=>{
@@ -482,7 +488,6 @@ function openUnitDetail(unitId){
     if(!d2){ showToast('Could not find that deficiency — try reloading.'); return; }
     d2.status='Done'; d2.completedDate=todayISO();
     await sset('defs', state.defs);
-    closeModal();
     showToast('Marked done.');
     openUnitDetail(unitId);
   });
