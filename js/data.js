@@ -12,10 +12,22 @@ const DEFAULT_UNITS = [
 
 const CURRENT_PHASE_OPTIONS = ['Pre-Cribbing','Pre-Excavation','Pre-Undergrounds','Pre-Backfill','Pre-Framing','FRAME CHECK: Pre-IPD','FRAME CHECK: Exterior','FRAME CHECK: ALL Rooms','FRAME CHECK: Garage','FRAME CHECK: Powder Room/Bathrooms','FRAME CHECK: Kitchen','FRAME CHECK: Laundry','FRAME CHECK: Stairs','FRAME CHECK: Living Room/Bedrooms','FRAME CHECK: Mechanical Room','FRAME CHECK: Decks/Porches',"FRAME CHECK: Post-Rough-In's Backframing",'Pre-Rough-ins','Pre-HVAC rough-in','Spray Paint','Pre-rough city inspections','Pre-Insulation and Drywall','Pre-Boarding','Pre-Taping','Pre-S1','Pre-OTR','Pre-Flooring','Pre-S2 Carpentry','Pre-Trade Finals','Pre-Final Inspection and Appliances','Con Walk and Pre-Occupancy: Con Walk','Con Walk and Pre-Occupancy: Stress Tests','Con Walk and Pre-Occupancy: Exterior Pre-Occ','Possession'];
 
+function businessDaysBetween(fromISO, toISO){
+  const d = new Date(fromISO);
+  const to = new Date(toISO);
+  let count = 0;
+  while(d < to){
+    d.setUTCDate(d.getUTCDate()+1);
+    const day = d.getUTCDay();
+    if(day!==0 && day!==6) count++;
+  }
+  return count;
+}
+
 function computeRisk(u){
   if(u.riskOverride) return u.riskOverride;
   if(!u.lastWalkDate) return '🔴';
-  const days = Math.floor((new Date(todayISO()) - new Date(u.lastWalkDate)) / 86400000);
+  const days = businessDaysBetween(u.lastWalkDate, todayISO());
   if(days<=2) return '🟢';
   if(days<=4) return '🟡';
   if(days<=7) return '🟠';
