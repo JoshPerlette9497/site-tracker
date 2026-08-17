@@ -1042,6 +1042,12 @@ function renderSync(){
     <div class="helptext" style="margin-bottom:8px;">Restore from a backup file. This replaces everything currently in the app — units, checklist, deficiencies, schedule.</div>
     <input type="file" id="restoreFile" accept="application/json" style="margin-top:0;">
     <button class="btn danger" id="restoreBtn" style="width:100%; margin-top:10px;">Restore From File</button>
+  </div>
+  <div class="divider"></div>
+  <div class="section-title">Security</div>
+  <div class="card">
+    <div class="helptext" style="margin-bottom:8px;">Clears the access code saved on this device. You'll be asked to re-enter it next load.</div>
+    <button class="btn ghost" id="changeKeyBtn" style="width:100%;">Change Access Code</button>
   </div>`;
   app.innerHTML = html;
   document.getElementById('syncImportBtn').onclick = async()=>{
@@ -1056,6 +1062,12 @@ function renderSync(){
   };
   document.getElementById('backupBtn').onclick = doBackup;
   document.getElementById('restoreBtn').onclick = doRestore;
+  document.getElementById('changeKeyBtn').onclick = ()=>{
+    showConfirm('Clear the saved access code on this device? You will need to re-enter it.', ()=>{
+      clearSiteKey();
+      location.reload();
+    });
+  };
 }
 
 async function doBackup(){

@@ -2,10 +2,14 @@
 const SUPABASE_URL = 'https://iafzmkwahiusfdxodgdi.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhZnpta3dhaGl1c2ZkeG9kZ2RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4MTE2ODIsImV4cCI6MjEwMjM4NzY4Mn0.-9plVpsptVaOZfVrhrLOovhYuZEghGUSLFx5yr7i-HU';
 
+function getSiteKey(){ return localStorage.getItem('siteLogKey') || ''; }
+function setSiteKey(key){ localStorage.setItem('siteLogKey', key); }
+function clearSiteKey(){ localStorage.removeItem('siteLogKey'); }
+
 async function sget(key, fallback){
   try{
     const res = await fetch(`${SUPABASE_URL}/rest/v1/app_data?key=eq.${encodeURIComponent(key)}&select=value`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'x-site-key': getSiteKey() }
     });
     if(!res.ok) return fallback;
     const rows = await res.json();
@@ -20,7 +24,8 @@ async function sset(key, value){
       headers: {
         apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates'
+        'Prefer': 'resolution=merge-duplicates',
+        'x-site-key': getSiteKey()
       },
       body: JSON.stringify({key, value: JSON.stringify(value), updated_at: new Date().toISOString()})
     });
