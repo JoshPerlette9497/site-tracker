@@ -116,7 +116,7 @@ function cardForInstance(inst, m, u, due, st){
 }
 
 function cardForDef(d, st){
-  return `<div class="card ${st}" data-def="${d.id}">
+  return `<div class="card ${st} def-card" data-def="${d.id}" style="cursor:pointer;">
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(d.description)}</div>
@@ -128,6 +128,36 @@ function cardForDef(d, st){
       <button class="btn small done-btn defact-done">Mark Done</button>
     </div>
   </div>`;
+}
+
+function openEditDefModal(defId, onSaved){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
+  showModal(`
+    <h2>Edit Deficiency</h2>
+    <label>Description</label><textarea id="edDesc" style="min-height:60px;">${escapeHtml(d.description)}</textarea>
+    <div class="field-row">
+      <div><label>Owner</label><select id="edOwner">
+        <option value="Trade" ${d.owner==='Trade'?'selected':''}>Trade</option>
+        <option value="Josh" ${d.owner==='Josh'?'selected':''}>Josh</option>
+        <option value="Unassigned" ${(!d.owner||d.owner==='Unassigned')?'selected':''}>Unassigned</option>
+      </select></div>
+      <div><label>Due Date</label><input id="edDue" type="date" value="${d.dueDate||''}"></div>
+    </div>
+    <div class="divider"></div>
+    <button class="btn" id="edSave" style="width:100%;">Save Changes</button>
+  `);
+  document.getElementById('edSave').onclick = async()=>{
+    const desc = document.getElementById('edDesc').value.trim();
+    if(!desc){ showToast('Description cannot be empty.'); return; }
+    d.description = desc;
+    d.owner = document.getElementById('edOwner').value;
+    d.dueDate = document.getElementById('edDue').value || null;
+    await sset('defs', state.defs);
+    closeModal();
+    showToast('Deficiency updated.');
+    if(onSaved) onSaved();
+  };
 }
 
 function wireCardActions(){
@@ -147,11 +177,16 @@ function wireCardActions(){
     });
   });
   document.querySelectorAll('.defact-done').forEach(b=>b.onclick=async(e)=>{
+    e.stopPropagation();
     const id = e.target.closest('[data-def]').dataset.def;
     const d = state.defs.find(x=>x.id===id);
     if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
     d.status='Done'; d.completedDate=todayISO();
     await sset('defs', state.defs); render();
+  });
+  document.querySelectorAll('.def-card').forEach(card=>card.onclick=(e)=>{
+    if(e.target.closest('button')) return;
+    openEditDefModal(card.dataset.def, render);
   });
 }
 
@@ -319,7 +354,7 @@ function openUnitDetail(unitId){
   const sortedDefs = defs.slice().sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
   for(const d of sortedDefs){
     const st = dueStatus(d.dueDate, d.status);
-    html += `<div class="card ${st}" data-uddef="${d.id}"><div class="row"><div>
+    html += `<div class="card ${st} uddef-card" data-uddef="${d.id}" style="cursor:pointer;"><div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
       <div class="item-meta">${escapeHtml(d.owner||'Unassigned')} · ${d.status}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}</div>
       </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
@@ -350,6 +385,7 @@ function openUnitDetail(unitId){
     openDefModal(u.name, ()=>openUnitDetail(unitId));
   };
   document.querySelectorAll('.ud-def-done').forEach(b=>b.onclick=async(e)=>{
+    e.stopPropagation();
     const id = e.target.closest('[data-uddef]').dataset.uddef;
     const d2 = state.defs.find(d=>d.id===id);
     if(!d2){ showToast('Could not find that deficiency — try reloading.'); return; }
@@ -360,6 +396,7 @@ function openUnitDetail(unitId){
     openUnitDetail(unitId);
   });
   document.querySelectorAll('.ud-def-remove').forEach(b=>b.onclick=(e)=>{
+    e.stopPropagation();
     const id = e.target.closest('[data-uddef]').dataset.uddef;
     const d2 = state.defs.find(d=>d.id===id);
     closeModal();
@@ -369,6 +406,12 @@ function openUnitDetail(unitId){
       showToast('Removed.');
       openUnitDetail(unitId);
     });
+  });
+  document.querySelectorAll('.uddef-card').forEach(card=>card.onclick=(e)=>{
+    if(e.target.closest('button')) return;
+    const id = card.dataset.uddef;
+    closeModal();
+    openEditDefModal(id, ()=>openUnitDetail(unitId));
   });
 }
 
@@ -518,7 +561,7 @@ function renderDefs(){
 
 function defRowWithActions(d, showDatePicker){
   const st = dueStatus(d.dueDate, d.status);
-  return `<div class="card ${st}" data-def2="${d.id}">
+  return `<div class="card ${st} def2-card" data-def2="${d.id}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
       <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}</div>
@@ -533,6 +576,7 @@ function defRowWithActions(d, showDatePicker){
 
 function wireDefRowActions(){
   document.querySelectorAll('.def2-done').forEach(b=>b.onclick=async(e)=>{
+    e.stopPropagation();
     const id = e.target.closest('[data-def2]').dataset.def2;
     const d2 = state.defs.find(d=>d.id===id);
     if(!d2){ showToast('Could not find that deficiency — try reloading.'); return; }
@@ -540,6 +584,7 @@ function wireDefRowActions(){
     await sset('defs', state.defs); render();
   });
   document.querySelectorAll('.def-savedate').forEach(b=>b.onclick=async(e)=>{
+    e.stopPropagation();
     const card = e.target.closest('[data-def2]');
     const id = card.dataset.def2;
     const val = card.querySelector('.def-quickdate').value;
@@ -549,6 +594,11 @@ function wireDefRowActions(){
     await sset('defs', state.defs);
     showToast('Due date set.');
     render();
+  });
+  document.querySelectorAll('.def-quickdate').forEach(el=>el.onclick=(e)=>e.stopPropagation());
+  document.querySelectorAll('.def2-card').forEach(card=>card.onclick=(e)=>{
+    if(e.target.closest('button, input')) return;
+    openEditDefModal(card.dataset.def2, render);
   });
 }
 
