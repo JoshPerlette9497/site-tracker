@@ -121,6 +121,7 @@ async function loadAll(){
   await migrateUnitNames();
   await migrateRoundsFields();
   await migrateDefIds();
+  await migrateDefPriority();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -167,6 +168,14 @@ async function migrateDefIds(){
   let changed = false;
   for(const d of state.defs){
     if(!d.id){ d.id = uid(); changed = true; }
+  }
+  if(changed) await sset('defs', state.defs);
+}
+const PRIORITY_ORDER = {High:0, Medium:1, Low:2};
+async function migrateDefPriority(){
+  let changed = false;
+  for(const d of state.defs){
+    if(!d.priority){ d.priority = 'Medium'; changed = true; }
   }
   if(changed) await sset('defs', state.defs);
 }

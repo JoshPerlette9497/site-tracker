@@ -23,7 +23,11 @@ function renderBrief(){
   const tomorrow = addDays(today, 1);
 
   const openDefs = state.defs.filter(d=>d.status!=='Done');
-  const mine = openDefs.filter(d=>d.owner==='Josh' && d.dueDate && d.dueDate<=today).sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
+  const MINE_CAP = 2;
+  const mineAll = openDefs.filter(d=>d.owner==='Josh' && d.dueDate && d.dueDate<=today)
+    .sort((a,b)=> (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1) || (a.dueDate||'').localeCompare(b.dueDate||''));
+  const mine = mineAll.slice(0, MINE_CAP);
+  const mineHiddenCount = mineAll.length - mine.length;
   const tradeDueSoon = openDefs.filter(d=>d.owner==='Trade' && d.dueDate && d.dueDate<=tomorrow);
   const tradeOpenNoDue = openDefs.filter(d=>d.owner==='Trade' && !d.dueDate);
   const backlogCount = openDefs.filter(d=>(d.pushCount||0)>=1).length;
@@ -44,6 +48,7 @@ function renderBrief(){
 
   html += `<div class="section-title" style="margin-top:14px;">Mine to Drive<span class="pill">${mine.length}</span></div>`;
   html += mine.length ? mine.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">Nothing of yours due or overdue.</div>`;
+  if(mineHiddenCount>0) html += `<div class="empty" style="margin-top:0;">+${mineHiddenCount} more of yours waiting — see Deficiencies tab to reprioritize or spread out.</div>`;
 
   html += `<div class="section-title">Trade — Due Today/Tomorrow<span class="pill">${tradeDueSoon.length}</span></div>`;
   html += tradeDueSoon.length ? tradeDueSoon.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">None due soon.</div>`;
@@ -115,12 +120,18 @@ function cardForInstance(inst, m, u, due, st){
   </div>`;
 }
 
+function priorityTag(d){
+  if(d.priority==='High') return ` · <b style="color:var(--stamp-red);">HIGH</b>`;
+  if(d.priority==='Low') return ` · <span style="opacity:0.6;">low</span>`;
+  return '';
+}
+
 function cardForDef(d, st){
   return `<div class="card ${st} def-card" data-def="${d.id}" style="cursor:pointer;">
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(d.description)}</div>
-        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}</div>
+        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${priorityTag(d)}</div>
       </div>
       <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>
@@ -133,6 +144,7 @@ function cardForDef(d, st){
 function openEditDefModal(defId, onSaved){
   const d = state.defs.find(x=>x.id===defId);
   if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
+  let overbookConfirmed = false;
   showModal(`
     <h2>Edit Deficiency</h2>
     <label>Description</label><textarea id="edDesc" style="min-height:60px;">${escapeHtml(d.description)}</textarea>
@@ -144,15 +156,36 @@ function openEditDefModal(defId, onSaved){
       </select></div>
       <div><label>Due Date</label><input id="edDue" type="date" value="${d.dueDate||''}"></div>
     </div>
+    <label>Priority</label>
+    <select id="edPriority">
+      <option value="High" ${d.priority==='High'?'selected':''}>High</option>
+      <option value="Medium" ${(!d.priority||d.priority==='Medium')?'selected':''}>Medium</option>
+      <option value="Low" ${d.priority==='Low'?'selected':''}>Low</option>
+    </select>
+    <div id="edOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="edSave" style="width:100%;">Save Changes</button>
   `);
   document.getElementById('edSave').onclick = async()=>{
     const desc = document.getElementById('edDesc').value.trim();
     if(!desc){ showToast('Description cannot be empty.'); return; }
+    const owner = document.getElementById('edOwner').value;
+    const dueDate = document.getElementById('edDue').value || null;
+    if(owner==='Josh' && dueDate && !overbookConfirmed){
+      const count = joshBookingCount(dueDate, d.id);
+      if(count>=2){
+        overbookConfirmed = true;
+        const warn = document.getElementById('edOverbookWarning');
+        warn.style.display = 'block';
+        warn.textContent = `You already have ${count} items of yours due ${fmtDate(dueDate)}. Tap Save Changes again to save anyway.`;
+        document.getElementById('edSave').textContent = 'Save Anyway';
+        return;
+      }
+    }
     d.description = desc;
-    d.owner = document.getElementById('edOwner').value;
-    d.dueDate = document.getElementById('edDue').value || null;
+    d.owner = owner;
+    d.dueDate = dueDate;
+    d.priority = document.getElementById('edPriority').value;
     await sset('defs', state.defs);
     closeModal();
     showToast('Deficiency updated.');
@@ -356,7 +389,7 @@ function openUnitDetail(unitId){
     const st = dueStatus(d.dueDate, d.status);
     html += `<div class="card ${st} uddef-card" data-uddef="${d.id}" style="cursor:pointer;"><div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.owner||'Unassigned')} · ${d.status}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}</div>
+      <div class="item-meta">${escapeHtml(d.owner||'Unassigned')} · ${d.status}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${priorityTag(d)}</div>
       </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
       <div class="row" style="margin-top:8px; gap:6px;">
         <button class="btn small done-btn ud-def-done">Mark Done</button>
@@ -578,7 +611,7 @@ function defRowDone(d){
   return `<div class="card done def2-card" data-def2="${d.id}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}</div>
     </div><span class="stamp done">Done</span></div>
   </div>`;
 }
@@ -588,7 +621,7 @@ function defRowWithActions(d, showDatePicker){
   return `<div class="card ${st} def2-card" data-def2="${d.id}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${priorityTag(d)}</div>
     </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
     ${showDatePicker ? `<div class="row" style="margin-top:8px; gap:6px;">
       <input type="date" class="def-quickdate" style="margin-top:0;">
@@ -644,6 +677,7 @@ function openDefImportModal(){
         state.defs.push({
           id:uid(), location:r.location||'', description:r.description||'(no description)',
           owner:r.owner||'Unassigned', status:r.status||'DO', dueDate:r.dueDate||null,
+          priority:r.priority||'Medium',
           pushCount:r.pushCount||0, pushReason:r.pushReason||''
         });
         added++;
@@ -655,8 +689,13 @@ function openDefImportModal(){
   };
 }
 
+function joshBookingCount(dueDate, excludeId){
+  return state.defs.filter(d=>d.id!==excludeId && d.owner==='Josh' && d.dueDate===dueDate && d.status!=='Done').length;
+}
+
 function openDefModal(prefillLocation, onSaved){
   const dl = state.units.map(u=>`<option value="${escapeHtml(u.name)}">`).join('');
+  let overbookConfirmed = false;
   showModal(`
     <h2>Add Deficiency</h2>
     <label>Location</label>
@@ -667,15 +706,35 @@ function openDefModal(prefillLocation, onSaved){
       <div><label>Owner</label><select id="dOwner"><option>Trade</option><option>Josh</option><option>Unassigned</option></select></div>
       <div><label>Due Date</label><input id="dDue" type="date"></div>
     </div>
+    <label>Priority</label>
+    <select id="dPriority">
+      <option value="High">High</option>
+      <option value="Medium" selected>Medium</option>
+      <option value="Low">Low</option>
+    </select>
+    <div id="dOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="dSave">Add Deficiency</button>
   `);
   document.getElementById('dSave').onclick = async()=>{
     const desc = document.getElementById('dDesc').value.trim();
     if(!desc) return;
+    const owner = document.getElementById('dOwner').value;
+    const dueDate = document.getElementById('dDue').value || null;
+    if(owner==='Josh' && dueDate && !overbookConfirmed){
+      const count = joshBookingCount(dueDate);
+      if(count>=2){
+        overbookConfirmed = true;
+        const warn = document.getElementById('dOverbookWarning');
+        warn.style.display = 'block';
+        warn.textContent = `You already have ${count} items of yours due ${fmtDate(dueDate)}. Tap Add Deficiency again to add anyway.`;
+        document.getElementById('dSave').textContent = 'Add Anyway';
+        return;
+      }
+    }
     state.defs.push({
       id:uid(), location:document.getElementById('dLocation').value.trim(), description:desc,
-      owner:document.getElementById('dOwner').value, dueDate:document.getElementById('dDue').value||null,
+      owner, dueDate, priority:document.getElementById('dPriority').value,
       status:'DO', pushCount:0, pushReason:'', createdDate:todayISO()
     });
     await sset('defs', state.defs); closeModal();
