@@ -43,13 +43,13 @@ function renderBrief(){
   let html = `<div class="section-title">Daily Brief — ${fmtDate(today)}</div>`;
 
   html += `<div class="section-title" style="margin-top:14px;">Mine to Drive<span class="pill">${mine.length}</span></div>`;
-  html += mine.length ? mine.map(d=>defBriefRow(d)).join('') : `<div class="empty">Nothing of yours due or overdue.</div>`;
+  html += mine.length ? mine.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">Nothing of yours due or overdue.</div>`;
 
   html += `<div class="section-title">Trade — Due Today/Tomorrow<span class="pill">${tradeDueSoon.length}</span></div>`;
-  html += tradeDueSoon.length ? tradeDueSoon.map(d=>defBriefRow(d)).join('') : `<div class="empty">None due soon.</div>`;
+  html += tradeDueSoon.length ? tradeDueSoon.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">None due soon.</div>`;
 
   html += `<div class="section-title">Trade — Open, No Due Date<span class="pill">${tradeOpenNoDue.length}</span></div>`;
-  html += tradeOpenNoDue.length ? tradeOpenNoDue.map(d=>defBriefRow(d)).join('') : `<div class="empty">None.</div>`;
+  html += tradeOpenNoDue.length ? tradeOpenNoDue.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">None.</div>`;
 
   html += `<div class="section-title">Buildertrend — Finishing Today/Tomorrow<span class="pill">${finishingSoon.length}</span></div>`;
   if(finishingSoon.length){
@@ -68,14 +68,7 @@ function renderBrief(){
   html += `<div class="empty" style="margin-top:8px;">Backlog (pushed items): ${backlogCount}</div>`;
 
   app.innerHTML = html;
-}
-function defBriefRow(d){
-  const today = todayISO();
-  const st = dueStatus(d.dueDate, d.status);
-  return `<div class="card ${st}"><div class="row"><div>
-    <div class="item-name" style="font-size:14px;">${escapeHtml(d.description)}</div>
-    <div class="item-meta">${escapeHtml(d.location||'—')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}</div>
-  </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div></div>`;
+  wireCardActions();
 }
 
 function renderToday(){
