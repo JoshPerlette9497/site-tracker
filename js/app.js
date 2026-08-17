@@ -8,7 +8,13 @@ document.querySelectorAll('nav.tabs button').forEach(b=>{
   };
 });
 
-/* ---------- access gate ---------- */
+/* ---------- access gate ----------
+   verifySiteKey returns:
+     'ok'       - key confirmed good
+     'rejected' - Supabase explicitly denied it (wrong code)
+     'unknown'  - couldn't reach Supabase to check (network issue) — NOT treated as rejection,
+                  since a flaky mobile connection shouldn't wipe a previously-working code
+*/
 async function verifySiteKey(key){
   try{
     const writeRes = await fetch(`${SUPABASE_URL}/rest/v1/app_data`, {
@@ -20,14 +26,16 @@ async function verifySiteKey(key){
       },
       body: JSON.stringify({key:'__key_check', value: JSON.stringify('ok'), updated_at: new Date().toISOString()})
     });
-    if(!writeRes.ok) return false;
+    if(writeRes.status===401 || writeRes.status===403) return 'rejected';
+    if(!writeRes.ok) return 'unknown';
     const readRes = await fetch(`${SUPABASE_URL}/rest/v1/app_data?key=eq.__key_check&select=value`, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'x-site-key': key }
     });
-    if(!readRes.ok) return false;
+    if(readRes.status===401 || readRes.status===403) return 'rejected';
+    if(!readRes.ok) return 'unknown';
     const rows = await readRes.json();
-    return !!(rows && rows.length);
-  }catch(e){ return false; }
+    return (rows && rows.length) ? 'ok' : 'rejected';
+  }catch(e){ return 'unknown'; }
 }
 
 function promptSiteKeyModal(){
@@ -60,8 +68,8 @@ async function ensureSiteKey(){
   let key = getSiteKey();
   while(true){
     if(key){
-      const ok = await verifySiteKey(key);
-      if(ok) return;
+      const result = await verifySiteKey(key);
+      if(result==='ok' || result==='unknown') return;
       clearSiteKey();
       showToast('Access code rejected — try again.');
       key = null;
