@@ -547,7 +547,6 @@ function openRoundModal(unitId){
       <option value="" ${!u.riskOverride?'selected':''}>Auto</option>
       <option value="🟢" ${u.riskOverride==='🟢'?'selected':''}>🟢 Green</option>
       <option value="🟡" ${u.riskOverride==='🟡'?'selected':''}>🟡 Yellow</option>
-      <option value="🟠" ${u.riskOverride==='🟠'?'selected':''}>🟠 Orange</option>
       <option value="🔴" ${u.riskOverride==='🔴'?'selected':''}>🔴 Red</option>
     </select>
     <div class="divider"></div>
