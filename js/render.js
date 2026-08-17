@@ -539,24 +539,48 @@ function openMasterModal(){
 }
 
 function renderDefs(){
-  let html = `<div class="section-title">Deficiencies<span><button class="btn small ghost" id="importDefBtn">Import</button> <button class="btn small" id="addDefBtn">+ Add</button></span></div>`;
-  if(state.defs.length===0) html += `<div class="empty">No deficiencies logged.</div>`;
   const open = state.defs.filter(d=>d.status!=='Done');
   const dated = open.filter(d=>d.dueDate).sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
   const undated = open.filter(d=>!d.dueDate);
+  const done = state.defs.filter(d=>d.status==='Done').sort((a,b)=>(b.completedDate||'').localeCompare(a.completedDate||''));
+  if(!['dated','undated','done'].includes(defsFilterTab)) defsFilterTab = 'dated';
 
-  html += `<div class="section-title" style="margin-top:14px;">By Due Date<span class="pill">${dated.length}</span></div>`;
-  if(dated.length===0) html += `<div class="empty">Nothing with a due date yet.</div>`;
-  for(const d of dated){ html += defRowWithActions(d); }
+  let html = `<div class="section-title">Deficiencies<span><button class="btn small ghost" id="importDefBtn">Import</button> <button class="btn small" id="addDefBtn">+ Add</button></span></div>`;
 
-  html += `<div class="section-title">No Due Date<span class="pill">${undated.length}</span></div>`;
-  if(undated.length===0) html += `<div class="empty">Everything has a due date.</div>`;
-  for(const d of undated){ html += defRowWithActions(d, true); }
+  html += `<div style="display:flex; gap:6px; margin:10px 4px 14px;">
+    <button class="btn small defs-filter-pick ${defsFilterTab==='dated'?'':'ghost'}" data-filter="dated" style="flex:1;">Due Date <span class="pill">${dated.length}</span></button>
+    <button class="btn small defs-filter-pick ${defsFilterTab==='undated'?'':'ghost'}" data-filter="undated" style="flex:1;">No Date <span class="pill">${undated.length}</span></button>
+    <button class="btn small defs-filter-pick ${defsFilterTab==='done'?'':'ghost'}" data-filter="done" style="flex:1;">Done <span class="pill">${done.length}</span></button>
+  </div>`;
+
+  if(defsFilterTab==='dated'){
+    if(dated.length===0) html += `<div class="empty">Nothing with a due date yet.</div>`;
+    for(const d of dated){ html += defRowWithActions(d); }
+  } else if(defsFilterTab==='undated'){
+    if(undated.length===0) html += `<div class="empty">Everything has a due date.</div>`;
+    for(const d of undated){ html += defRowWithActions(d, true); }
+  } else {
+    if(done.length===0) html += `<div class="empty">Nothing marked done yet.</div>`;
+    for(const d of done){ html += defRowDone(d); }
+  }
 
   app.innerHTML = html;
   document.getElementById('addDefBtn').onclick = ()=>openDefModal();
   document.getElementById('importDefBtn').onclick = ()=>openDefImportModal();
+  document.querySelectorAll('.defs-filter-pick').forEach(b=>b.onclick=()=>{
+    defsFilterTab = b.dataset.filter;
+    render();
+  });
   wireDefRowActions();
+}
+
+function defRowDone(d){
+  return `<div class="card done def2-card" data-def2="${d.id}" style="cursor:pointer;">
+    <div class="row"><div>
+      <div class="item-name">${escapeHtml(d.description)}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}</div>
+    </div><span class="stamp done">Done</span></div>
+  </div>`;
 }
 
 function defRowWithActions(d, showDatePicker){
