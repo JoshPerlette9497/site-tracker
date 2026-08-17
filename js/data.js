@@ -82,6 +82,7 @@ let selectedScheduleUnit = null;
 let selectedLogDate = null;
 let expandedGroupIds = new Set();
 let defsFilterTab = 'dated';
+let logSearchQuery = null;
 
 const LOG_HISTORY_SEED = [
 {date:'2026-08-04', content:"**AB03:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Josh corrected three undersized door openings in unit 2234 and 2236 basements same-day. CSM Flooring scheduled Fri 8/7 to level unit 2234 basement floor.\n**AB04:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Basement development for unit 2240 underway: IPD completed today, plumbers rough-in/finish tomorrow, HVAC rough-in 8/6, floor leveling 8/7, electrical rough-in 8/10, full inspection 8/11.\n**AB16:** Painters on site, finishing 8/6. CSM Flooring up next, 8/7–8/14.\n**AB17:** Plumbing final on site, finishing 8/6; HVAC final up next. Added deficiencies to verify shelves/mirrors installed and install Slokker Homes powder room mirror.\n**JB01:** Still waiting on permit to begin construction; following up with office/Scott on 8/7.\n**JB12:** No activity change. Following up with C+J Co on NC rate for slab pour.\n**JB20:** No activity change.\n**Site-wide:** Curb stop walk completed — deficiencies logged for AB02/06/07/08/11/12 and AB13–18. Punch list added: bollard light bases, bollard lights install, city sidewalk/81st St/AB18 path."},
@@ -129,6 +130,24 @@ async function loadAll(){
   }
   await sset('units', state.units);
   await sset('master', state.master);
+  await archivePastDayLog();
+}
+
+async function archivePastDayLog(){
+  const last = await sget('lastLogSnapshotDate', null);
+  const today = todayISO();
+  if(last === null){
+    await sset('lastLogSnapshotDate', today);
+    return;
+  }
+  if(last < today){
+    const alreadyArchived = state.logHistory.some(h=>h.date===last);
+    if(!alreadyArchived){
+      state.logHistory.push({date:last, content:buildDayLog(last), auto:true});
+      await sset('logHistory', state.logHistory);
+    }
+    await sset('lastLogSnapshotDate', today);
+  }
 }
 
 const NAME_MIGRATION_MAP = {

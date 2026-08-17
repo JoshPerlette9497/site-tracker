@@ -748,55 +748,132 @@ function mdToHtml(text){
     .replace(/\n/g, '<br>');
 }
 
-function buildTodaysLog(){
-  const today = todayISO();
-  const roundsToday = state.roundHistory.filter(r=>r.date===today);
-  const defsAdded = state.defs.filter(d=>d.createdDate===today);
-  const defsCompleted = state.defs.filter(d=>d.status==='Done');
-  const defsOverdue = state.defs.filter(d=>d.status!=='Done' && d.dueDate && d.dueDate<today);
-  const defsDueToday = state.defs.filter(d=>d.status!=='Done' && d.dueDate===today);
-  const checklistAddedToday = [], checklistDueToday = [], checklistOverdue = [], checklistCompletedToday = [];
+function buildBriefSummary(date){
+  const openDefs = state.defs.filter(d=>d.status!=='Done');
+  const mineAll = openDefs.filter(d=>d.owner==='Josh' && d.dueDate && d.dueDate<=date)
+    .sort((a,b)=> (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1) || (a.dueDate||'').localeCompare(b.dueDate||''));
+  const mine = mineAll.slice(0,2);
+  const tradeDueSoon = openDefs.filter(d=>d.owner==='Trade' && d.dueDate && d.dueDate<=addDays(date,1));
+  let html = `<b>Planned (Brief):</b><br>`;
+  html += `Mine to drive: ` + (mine.length ? mine.map(d=>escapeHtml(d.description)).join('; ') : 'none');
+  html += `<br>Trade due today/tomorrow: ${tradeDueSoon.length}`;
+  return html;
+}
+
+function buildDayLog(date){
+  const isToday = date === todayISO();
+  const roundsOnDate = state.roundHistory.filter(r=>r.date===date);
+  const defsAdded = state.defs.filter(d=>d.createdDate===date);
+  const defsCompletedOnDate = state.defs.filter(d=>d.completedDate===date);
+  const checklistAddedOnDate = [], checklistCompletedOnDate = [], checklistDueToday = [], checklistOverdue = [];
   for(const inst of state.instances){
     const {m,due} = instanceInfo(inst);
     if(!m) continue;
-    if(inst.createdDate===today) checklistAddedToday.push(m.name);
-    if(inst.status==='Done' && inst.completedDate===today) checklistCompletedToday.push(m.name);
-    else if(due===today) checklistDueToday.push(m.name);
-    else if(due && due<today && inst.status!=='Done') checklistOverdue.push(m.name);
+    if(inst.createdDate===date) checklistAddedOnDate.push(m.name);
+    if(inst.status==='Done' && inst.completedDate===date) checklistCompletedOnDate.push(m.name);
+    if(isToday){
+      if(due===date && inst.status!=='Done') checklistDueToday.push(m.name);
+      else if(due && due<date && inst.status!=='Done') checklistOverdue.push(m.name);
+    }
   }
-  let html = '';
-  html += `<b>Rounds logged today (${roundsToday.length}):</b><br>` + (roundsToday.length? roundsToday.map(r=>escapeHtml(r.unitName+' — '+r.risk+' — '+(r.currentPhase||'—'))).join('<br>') : '<span style="opacity:0.6">none</span>');
-  html += `<br><br><b>Deficiencies added today (${defsAdded.length}):</b><br>` + (defsAdded.length? defsAdded.map(d=>escapeHtml(d.description)).join('<br>') : '<span style="opacity:0.6">none</span>');
-  html += `<br><br><b>Deficiencies due today (${defsDueToday.length}):</b><br>` + (defsDueToday.length? defsDueToday.map(d=>escapeHtml(d.description)).join('<br>') : '<span style="opacity:0.6">none</span>');
-  html += `<br><br><b>Deficiencies overdue (${defsOverdue.length}):</b><br>` + (defsOverdue.length? defsOverdue.map(d=>escapeHtml(d.description)).join('<br>') : '<span style="opacity:0.6">none</span>');
-  html += `<br><br><b>Deficiencies completed today (${defsCompleted.filter(d=>d.completedDate===today).length}):</b><br>` + (defsCompleted.some(d=>d.completedDate===today)? defsCompleted.filter(d=>d.completedDate===today).map(d=>escapeHtml(d.description)).join('<br>') : '<span style="opacity:0.6">none</span>');
-  html += `<br><br><b>Checklist items added today (${checklistAddedToday.length}):</b><br>` + (checklistAddedToday.length? checklistAddedToday.map(escapeHtml).join('<br>') : '<span style="opacity:0.6">none</span>');
-  html += `<br><br><b>Checklist due today (${checklistDueToday.length}):</b><br>` + (checklistDueToday.length? checklistDueToday.map(escapeHtml).join('<br>') : '<span style="opacity:0.6">none</span>');
-  html += `<br><br><b>Checklist overdue (${checklistOverdue.length}):</b><br>` + (checklistOverdue.length? checklistOverdue.map(escapeHtml).join('<br>') : '<span style="opacity:0.6">none</span>');
-  html += `<br><br><b>Checklist completed today (${checklistCompletedToday.length}):</b><br>` + (checklistCompletedToday.length? checklistCompletedToday.map(escapeHtml).join('<br>') : '<span style="opacity:0.6">none</span>');
+  let html = buildBriefSummary(date);
+  html += `<br><br><b>Rounds logged (${roundsOnDate.length}):</b><br>` + (roundsOnDate.length? roundsOnDate.map(r=>escapeHtml(r.unitName+' — '+r.risk+' — '+(r.currentPhase||'—'))).join('<br>') : '<span style="opacity:0.6">none</span>');
+  html += `<br><br><b>Deficiencies added (${defsAdded.length}):</b><br>` + (defsAdded.length? defsAdded.map(d=>escapeHtml(d.description)).join('<br>') : '<span style="opacity:0.6">none</span>');
+  html += `<br><br><b>Deficiencies completed (${defsCompletedOnDate.length}):</b><br>` + (defsCompletedOnDate.length? defsCompletedOnDate.map(d=>escapeHtml(d.description)).join('<br>') : '<span style="opacity:0.6">none</span>');
+  if(isToday){
+    const defsOverdue = state.defs.filter(d=>d.status!=='Done' && d.dueDate && d.dueDate<date);
+    const defsDueToday = state.defs.filter(d=>d.status!=='Done' && d.dueDate===date);
+    html += `<br><br><b>Deficiencies due today (${defsDueToday.length}):</b><br>` + (defsDueToday.length? defsDueToday.map(d=>escapeHtml(d.description)).join('<br>') : '<span style="opacity:0.6">none</span>');
+    html += `<br><br><b>Deficiencies overdue (${defsOverdue.length}):</b><br>` + (defsOverdue.length? defsOverdue.map(d=>escapeHtml(d.description)).join('<br>') : '<span style="opacity:0.6">none</span>');
+  }
+  html += `<br><br><b>Checklist items added (${checklistAddedOnDate.length}):</b><br>` + (checklistAddedOnDate.length? checklistAddedOnDate.map(escapeHtml).join('<br>') : '<span style="opacity:0.6">none</span>');
+  if(isToday){
+    html += `<br><br><b>Checklist due today (${checklistDueToday.length}):</b><br>` + (checklistDueToday.length? checklistDueToday.map(escapeHtml).join('<br>') : '<span style="opacity:0.6">none</span>');
+    html += `<br><br><b>Checklist overdue (${checklistOverdue.length}):</b><br>` + (checklistOverdue.length? checklistOverdue.map(escapeHtml).join('<br>') : '<span style="opacity:0.6">none</span>');
+  }
+  html += `<br><br><b>Checklist items completed (${checklistCompletedOnDate.length}):</b><br>` + (checklistCompletedOnDate.length? checklistCompletedOnDate.map(escapeHtml).join('<br>') : '<span style="opacity:0.6">none</span>');
   return html;
+}
+
+function stripMarkup(raw){
+  return (raw||'')
+    .replace(/<[^>]+>/g,' ')
+    .replace(/\*\*/g,'')
+    .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'")
+    .replace(/\s+/g,' ').trim();
+}
+
+function searchLogHistory(query){
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if(!words.length) return [];
+  const today = todayISO();
+  const entries = state.logHistory.filter(h=>h.date!==today).map(h=>({date:h.date, content:h.content}));
+  entries.push({date:today, content:buildDayLog(today)});
+  const results = [];
+  for(const e of entries){
+    const plain = stripMarkup(e.content);
+    const lower = plain.toLowerCase();
+    let score = 0;
+    for(const w of words){
+      let idx = lower.indexOf(w);
+      while(idx!==-1){ score++; idx = lower.indexOf(w, idx+w.length); }
+    }
+    if(score===0) continue;
+    const firstIdx = words.map(w=>lower.indexOf(w)).filter(i=>i!==-1).sort((a,b)=>a-b)[0];
+    const start = Math.max(0, firstIdx-40);
+    let snippet = plain.slice(start, start+160);
+    if(start>0) snippet = '…'+snippet;
+    if(start+160<plain.length) snippet += '…';
+    results.push({date:e.date, score, snippet});
+  }
+  results.sort((a,b)=> b.score-a.score || b.date.localeCompare(a.date));
+  return results.slice(0,20);
 }
 
 function renderLog(){
   const today = todayISO();
-  const historyDates = state.logHistory.map(h=>h.date);
-  const allDates = [today, ...historyDates.filter(d=>d!==today)].sort().reverse();
-  if(!selectedLogDate || !allDates.includes(selectedLogDate)) selectedLogDate = today;
+  if(!selectedLogDate) selectedLogDate = today;
 
   let html = `<div class="section-title">Daily Log</div>`;
-  html += `<div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:8px;">`;
-  for(const d of allDates){
-    const isSel = d===selectedLogDate;
-    const label = d===today ? 'Today' : fmtDate(d);
-    html += `<button class="btn ${isSel?'':'ghost'} small log-date-pick" data-date="${d}" style="flex-shrink:0; white-space:nowrap;">${label}</button>`;
+  html += `<div class="field-row" style="margin-bottom:4px;">
+    <input id="logSearchInput" placeholder="Search logs (e.g. drywall, permit, AB17)" value="${escapeHtml(logSearchQuery||'')}" style="margin-top:0;">
+    <button class="btn small" id="logSearchBtn" style="flex-shrink:0; margin-top:0;">Search</button>
+  </div>`;
+
+  if(logSearchQuery){
+    const results = searchLogHistory(logSearchQuery);
+    html += `<div class="section-title" style="margin-top:10px;">Results for "${escapeHtml(logSearchQuery)}"<button class="btn small ghost" id="logSearchClear">Clear</button></div>`;
+    if(results.length===0) html += `<div class="empty">No matches found.</div>`;
+    for(const r of results){
+      html += `<div class="card log-search-result" data-date="${r.date}" style="cursor:pointer;">
+        <div class="item-meta" style="font-weight:700;">${r.date===today?'Today':fmtDate(r.date)}</div>
+        <div style="font-size:13px; margin-top:4px;">${escapeHtml(r.snippet)}</div>
+      </div>`;
+    }
+    app.innerHTML = html;
+    wireLogSearchBox();
+    document.getElementById('logSearchClear').onclick = ()=>{ logSearchQuery = null; render(); };
+    document.querySelectorAll('.log-search-result').forEach(card=>card.onclick=()=>{
+      selectedLogDate = card.dataset.date;
+      logSearchQuery = null;
+      render();
+    });
+    return;
   }
-  html += `</div>`;
+
+  html += `<div class="field-row" style="margin-top:4px; margin-bottom:8px;">
+    <button class="btn small ghost" id="logTodayBtn" style="flex-shrink:0; margin-top:0;">Today</button>
+    <input id="logDatePick" type="date" value="${selectedLogDate}" style="margin-top:0;">
+  </div>`;
 
   const hist = state.logHistory.find(h=>h.date===selectedLogDate);
   html += `<div class="card">`;
   if(selectedLogDate===today){
     html += `<div class="item-meta" style="font-weight:700; margin-bottom:8px;">LIVE — updates automatically</div>`;
-    html += `<div style="font-size:13px; line-height:1.6;">${buildTodaysLog()}</div>`;
+    html += `<div style="font-size:13px; line-height:1.6;">${buildDayLog(today)}</div>`;
+  } else if(hist && hist.auto){
+    html += `<div class="item-meta" style="font-weight:700; margin-bottom:8px; opacity:0.7;">AUTO-ARCHIVED — captured at day's end</div>`;
+    html += `<div style="font-size:13px; line-height:1.6;">${hist.content}</div>`;
   } else if(hist){
     html += `<div class="item-meta" style="font-weight:700; margin-bottom:8px; opacity:0.7;">READ-ONLY HISTORY — imported from Notion</div>`;
     html += `<div style="font-size:13px; line-height:1.6;">${mdToHtml(hist.content)}</div>`;
@@ -806,10 +883,19 @@ function renderLog(){
   html += `</div>`;
 
   app.innerHTML = html;
-  document.querySelectorAll('.log-date-pick').forEach(b=>b.onclick=()=>{
-    selectedLogDate = b.dataset.date;
+  wireLogSearchBox();
+  document.getElementById('logTodayBtn').onclick = ()=>{ selectedLogDate = today; render(); };
+  document.getElementById('logDatePick').onchange = (e)=>{ selectedLogDate = e.target.value; render(); };
+}
+
+function wireLogSearchBox(){
+  const doSearch = ()=>{
+    const q = document.getElementById('logSearchInput').value.trim();
+    logSearchQuery = q || null;
     render();
-  });
+  };
+  document.getElementById('logSearchBtn').onclick = doSearch;
+  document.getElementById('logSearchInput').onkeydown = (e)=>{ if(e.key==='Enter') doSearch(); };
 }
 
 function renderSchedule(){
