@@ -15,19 +15,26 @@ This is a construction site management PWA for Josh Perlette (site superintenden
 Currently backed by Supabase (already set up):
 - Project URL: `https://iafzmkwahiusfdxodgdi.supabase.co`
 - Single table `app_data (key text primary key, value text, updated_at timestamptz)` — a simple key-value store. The app reads/writes JSON blobs by key (`units`, `defs`, `schedule`, `checklistGroups`, `groupInstances`, `roundHistory`, `logHistory`, `master`, `instances`, `lastBackup`).
-- RLS policy currently allows anon read/write to everything — fine for single-user personal use, but flag this to Josh if the app ever needs real access control.
-- The anon key is in `index.html` under `SUPABASE_ANON_KEY` — safe to keep client-side (that's how Supabase's anon key is designed to work), but real protection would come from tightening RLS policies if this ever needs to be more secure.
+- RLS policy on `app_data` requires every request to carry an `x-site-key` header matching a shared passphrase (see "Access code" below) — replaced the old wide-open anon policy once the site moved to a public GitHub Pages URL.
+- The anon key is in `js/storage.js` under `SUPABASE_ANON_KEY` — safe to keep client-side (that's how Supabase's anon key is designed to work); the RLS policy above is what actually gates read/write access now.
+
+## Access code
+- The app prompts for a passphrase on first load per device (`js/app.js`: `ensureSiteKey()`), stores it in `localStorage`, and sends it as the `x-site-key` header on every Supabase request (`js/storage.js`).
+- A wrong/missing code is verified against Supabase with a real write+read round-trip — on rejection it clears the stored value and re-prompts rather than silently loading empty/default data.
+- To rotate the passphrase: update the Supabase RLS policy's literal value, then have Josh clear it on each device via Sync tab → "Change Access Code" (or just clear `localStorage` for the site).
+- The passphrase itself is never committed to this repo — it only lives in the Supabase policy and in whatever's typed into the app.
 
 ## What to do first
 1. ~~Split `index.html` into a proper structure.~~ Done — see file layout below.
-2. ~~Initialize git, create a GitHub repo, push.~~ Done — private repo at [JoshPerlette9497/site-tracker](https://github.com/JoshPerlette9497/site-tracker).
-3. ~~Connect Netlify to the GitHub repo for auto-deploy on push.~~ Done — [slokker-site-log.netlify.app](https://slokker-site-log.netlify.app) (private), auto-deploys from `master` on every push.
+2. ~~Initialize git, create a GitHub repo, push.~~ Done — public repo at [JoshPerlette9497/site-tracker](https://github.com/JoshPerlette9497/site-tracker).
+3. ~~Connect Netlify to the GitHub repo for auto-deploy on push.~~ Superseded — moved to GitHub Pages (see Deployment) once Netlify's free-tier usage cap started billing.
 4. Keep the Supabase connection exactly as-is — don't recreate the database or table.
 5. Preserve the PWA manifest + service worker setup so installability keeps working.
 
 ## Deployment
-- **GitHub**: private repo `JoshPerlette9497/site-tracker`, default branch `master`.
-- **Netlify**: project `slokker-site-log`, deploys from GitHub on every push to `master`. No build command — this is a static site (base directory, build command, and publish directory are all left at their defaults/root). Currently a private Netlify project (only team members can view); use "Make public" in the Netlify UI if Josh wants the URL shareable without a Netlify login.
+- **GitHub**: public repo `JoshPerlette9497/site-tracker`, default branch `master`. Made public specifically so GitHub Pages could serve it for free (Pages on private repos requires a paid GitHub plan); the repo being public is fine since the app's actual data is gated by the Supabase access-code policy above, not by hiding the source.
+- **GitHub Pages**: [joshperlette9497.github.io/site-tracker](https://joshperlette9497.github.io/site-tracker/), deploys from `master` root on every push (Settings → Pages → Deploy from a branch). No build step — same static files Netlify used to serve.
+- **Netlify**: retired. The project previously lived at `slokker-site-log.netlify.app`; moved off it once its free tier usage cap started incurring charges. Safe to delete/downgrade that Netlify site now that Pages is confirmed working.
 
 ## Files in this folder
 - `index.html` — HTML shell only (header, tab nav, `<main>` mount point); loads `style.css` and the `js/` modules
