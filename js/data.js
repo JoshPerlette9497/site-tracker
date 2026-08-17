@@ -65,7 +65,7 @@ const CHECKLIST_GROUPS_SEED = [
 {id:uid(),name:'Pre-Trade Finals',milestone:'Finishing',offsetDays:2,matchPhase:'floor qc',items:[{id:uid(),text:'CHANGE FURNACE FILTER'},{id:uid(),text:'S2 carpenter done and cleaned up'},{id:uid(),text:'flooring done and ready for HVAC final'}]},
 {id:uid(),name:'Pre-Final Inspection and Appliances',milestone:'Finishing',offsetDays:2,matchPhase:'plumbing final',items:[{id:uid(),text:'con walk to-do list done (Slokker staff + YOU)'},{id:uid(),text:'CONSTRUCTION IS COMPLETE AND ALL IS READY FOR FINAL INSPECTION'},{id:uid(),text:'correct appliances delivered'},{id:uid(),text:'HERITAGES ONLY: remove laundry room doors and DAP baseboard'}]},
 {id:uid(),name:'Con Walk and Pre-Occupancy',milestone:'Finishing',offsetDays:2,matchPhase:'construction walk through',items:[{id:uid(),text:'organize cabinets',subgroup:'Con Walk'},{id:uid(),text:'install BELLA powder room mirrors',subgroup:'Con Walk'},{id:uid(),text:'sweep/pressure wash garages/driveways/porches/decks/patios',subgroup:'Con Walk'},{id:uid(),text:'all mechanical OPERATIONAL AND SECURED',subgroup:'Con Walk'},{id:uid(),text:'WOCD locks OPERATIONAL AND SECURED',subgroup:'Con Walk'},{id:uid(),text:'garage door remotes x2 into kitchen drawer with all appliance manuals',subgroup:'Con Walk'},{id:uid(),text:'smoke detector shower caps',subgroup:'Con Walk'},{id:uid(),text:'paint tag out',subgroup:'Con Walk'},{id:uid(),text:'drydex garage man doors',subgroup:'Con Walk'},{id:uid(),text:'appliance clocks',subgroup:'Con Walk'},{id:uid(),text:'mechanical room spotless',subgroup:'Con Walk'},{id:uid(),text:'remove protective film on exterior door latches and sills',subgroup:'Con Walk'},{id:uid(),text:'CHANGE FURNACE FILTER',subgroup:'Con Walk'},{id:uid(),text:'bipass door bumpers',subgroup:'Con Walk'},{id:uid(),text:'handrail brackets reinstalled by painters',subgroup:'Con Walk'},{id:uid(),text:'black entry mat',subgroup:'Con Walk'},{id:uid(),text:'mech room panel labels',subgroup:'Stress Tests'},{id:uid(),text:'lights',subgroup:'Stress Tests'},{id:uid(),text:'smoke detectors',subgroup:'Stress Tests'},{id:uid(),text:'appliances',subgroup:'Stress Tests'},{id:uid(),text:'hot water tanks',subgroup:'Stress Tests'},{id:uid(),text:'bath fans',subgroup:'Stress Tests'},{id:uid(),text:'ventilation fan switch',subgroup:'Stress Tests'},{id:uid(),text:'outlets/switches',subgroup:'Stress Tests'},{id:uid(),text:'humidifier',subgroup:'Stress Tests'},{id:uid(),text:'tubs/sinks',subgroup:'Stress Tests'},{id:uid(),text:'exterior cleaned and graded for safety',subgroup:'Exterior Pre-Occ'},{id:uid(),text:'safe access to units',subgroup:'Exterior Pre-Occ'},{id:uid(),text:'utilities safe access and/or closed and secured',subgroup:'Exterior Pre-Occ'}]},
-{id:uid(),name:'Possession',milestone:'Finishing',offsetDays:2,matchPhase:'possession',items:[{id:uid(),text:'cleaners done'},{id:uid(),text:'humidifier plugged in and ON'},{id:uid(),text:'check all sinks appliances WATER ON'},{id:uid(),text:'doors rekey'},{id:uid(),text:'cabinets organized'},{id:uid(),text:'appliance clocks'}]}
+{id:uid(),name:'Possession',milestone:'Finishing',offsetDays:2,matchPhase:'possession',exactMatch:true,items:[{id:uid(),text:'cleaners done'},{id:uid(),text:'humidifier plugged in and ON'},{id:uid(),text:'check all sinks appliances WATER ON'},{id:uid(),text:'doors rekey'},{id:uid(),text:'cabinets organized'},{id:uid(),text:'appliance clocks'}]}
 ];
 
 // offsetDays: days BEFORE the matched schedule finish date the item is due.
@@ -235,7 +235,7 @@ const CHECKLIST_MATCH_UPDATES = {
   'Pre-Trade Finals': {matchPhase:'floor qc', offsetDays:2},
   'Pre-Final Inspection and Appliances': {matchPhase:'plumbing final', offsetDays:2},
   'Con Walk and Pre-Occupancy': {matchPhase:'construction walk through', offsetDays:2},
-  'Possession': {matchPhase:'possession', offsetDays:2},
+  'Possession': {matchPhase:'possession', offsetDays:2, exactMatch:true},
 };
 async function migrateChecklistMatchPhases(){
   let changed = false;
@@ -244,6 +244,7 @@ async function migrateChecklistMatchPhases(){
     if(!upd) continue;
     if(g.matchPhase !== upd.matchPhase){ g.matchPhase = upd.matchPhase; changed = true; }
     if(g.offsetDays !== upd.offsetDays){ g.offsetDays = upd.offsetDays; changed = true; }
+    if(!!g.exactMatch !== !!upd.exactMatch){ g.exactMatch = !!upd.exactMatch; changed = true; }
   }
   if(changed) await sset('checklistGroups', state.checklistGroups);
 }
@@ -256,9 +257,10 @@ function groupDueDate(unitId, group){
   if(!group.matchPhase) return null;
   const u = state.units.find(x=>x.id===unitId);
   if(!u) return null;
+  const phase = group.matchPhase.toLowerCase();
   const matches = state.schedule.filter(s =>
     s.location && s.location.toLowerCase().includes(u.name.toLowerCase()) &&
-    s.subject && s.subject.toLowerCase().includes(group.matchPhase.toLowerCase())
+    s.subject && (group.exactMatch ? s.subject.trim().toLowerCase()===phase : s.subject.toLowerCase().includes(phase))
   );
   if(matches.length===0) return null;
   const finish = matches.map(m=>m.finishDate).sort()[0];
