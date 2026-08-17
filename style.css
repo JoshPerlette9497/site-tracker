@@ -16,6 +16,7 @@
     color:var(--ink);}
   body{
     min-height:100vh;
+    min-height:100dvh;
     padding-bottom:calc(100px + env(safe-area-inset-bottom));
   }
   .mono{font-family:"SF Mono",Menlo,Consolas,monospace;}
@@ -23,7 +24,7 @@
     position:sticky; top:0; z-index:10;
     background:var(--brand-dark);
     border-bottom:3px solid var(--brand);
-    padding:14px 16px 12px;
+    padding:calc(14px + env(safe-area-inset-top)) 16px 12px;
   }
   header.top h1{margin:0; font-size:19px; letter-spacing:1.5px; font-weight:800; text-transform:uppercase; color:#fff;}
   header.top .sub{color:rgba(255,255,255,0.75); font-size:12px; margin-top:2px;}

@@ -225,10 +225,12 @@ function wireCardActions(){
 
 function renderUnits(){
   let html = `<div class="section-title">Units<div style="display:flex; gap:6px;"><button class="btn small ghost" id="bulkWalkBtn">Set Walk Date</button><button class="btn small" id="addUnitBtn">+ Add Unit</button></div></div>`;
+  html += `<input id="unitSearchInput" placeholder="Search units…" value="${escapeHtml(unitSearchQuery)}" style="margin:8px 4px 4px; width:calc(100% - 8px);">`;
   const byProject = {};
   for(const u of state.units){ (byProject[u.project]=byProject[u.project]||[]).push(u); }
   const riskOrder = {'🔴':0,'🟠':1,'🟡':2,'🟢':3};
   for(const proj in byProject){
+    html += `<div class="unit-group" data-project="${escapeHtml(proj)}">`;
     html += `<div style="margin:10px 4px 4px; color:var(--ink-dim); font-size:12px; font-weight:700;">${escapeHtml(proj)}</div>`;
     const sorted = byProject[proj].slice().sort((a,b)=>riskOrder[computeRisk(a)]-riskOrder[computeRisk(b)]);
     for(const u of sorted){
@@ -247,13 +249,32 @@ function renderUnits(){
         </div>
       </div>`;
     }
+    html += `</div>`;
   }
   app.innerHTML = html;
   document.getElementById('addUnitBtn').onclick = ()=>openUnitModal();
   document.getElementById('bulkWalkBtn').onclick = ()=>openBulkWalkModal();
+  document.getElementById('unitSearchInput').oninput = (e)=>{
+    unitSearchQuery = e.target.value;
+    applyUnitSearchFilter();
+  };
   document.querySelectorAll('[data-unit] .unit-open').forEach(b=>b.onclick=(e)=>{
     const id = e.target.closest('[data-unit]').dataset.unit;
     openUnitDetail(id);
+  });
+  applyUnitSearchFilter();
+}
+
+function applyUnitSearchFilter(){
+  const q = (unitSearchQuery||'').trim().toLowerCase();
+  document.querySelectorAll('.unit-group').forEach(group=>{
+    let anyVisible = false;
+    group.querySelectorAll('[data-unit]').forEach(card=>{
+      const match = !q || card.textContent.toLowerCase().includes(q);
+      card.style.display = match ? '' : 'none';
+      if(match) anyVisible = true;
+    });
+    group.style.display = anyVisible ? '' : 'none';
   });
 }
 
@@ -580,12 +601,15 @@ function renderDefs(){
 
   let html = `<div class="section-title">Deficiencies<span><button class="btn small ghost" id="importDefBtn">Import</button> <button class="btn small" id="addDefBtn">+ Add</button></span></div>`;
 
+  html += `<input id="defSearchInput" placeholder="Search deficiencies…" value="${escapeHtml(defSearchQuery)}" style="margin:8px 4px 0; width:calc(100% - 8px);">`;
+
   html += `<div style="display:flex; gap:6px; margin:10px 4px 14px;">
     <button class="btn small defs-filter-pick ${defsFilterTab==='dated'?'':'ghost'}" data-filter="dated" style="flex:1;">Due Date <span class="pill">${dated.length}</span></button>
     <button class="btn small defs-filter-pick ${defsFilterTab==='undated'?'':'ghost'}" data-filter="undated" style="flex:1;">No Date <span class="pill">${undated.length}</span></button>
     <button class="btn small defs-filter-pick ${defsFilterTab==='done'?'':'ghost'}" data-filter="done" style="flex:1;">Done <span class="pill">${done.length}</span></button>
   </div>`;
 
+  html += `<div id="defsListContainer">`;
   if(defsFilterTab==='dated'){
     if(dated.length===0) html += `<div class="empty">Nothing with a due date yet.</div>`;
     for(const d of dated){ html += defRowWithActions(d); }
@@ -596,15 +620,29 @@ function renderDefs(){
     if(done.length===0) html += `<div class="empty">Nothing marked done yet.</div>`;
     for(const d of done){ html += defRowDone(d); }
   }
+  html += `</div>`;
 
   app.innerHTML = html;
   document.getElementById('addDefBtn').onclick = ()=>openDefModal();
   document.getElementById('importDefBtn').onclick = ()=>openDefImportModal();
+  document.getElementById('defSearchInput').oninput = (e)=>{
+    defSearchQuery = e.target.value;
+    applyDefSearchFilter();
+  };
   document.querySelectorAll('.defs-filter-pick').forEach(b=>b.onclick=()=>{
     defsFilterTab = b.dataset.filter;
     render();
   });
   wireDefRowActions();
+  applyDefSearchFilter();
+}
+
+function applyDefSearchFilter(){
+  const q = (defSearchQuery||'').trim().toLowerCase();
+  document.querySelectorAll('#defsListContainer > div').forEach(card=>{
+    const match = !q || card.textContent.toLowerCase().includes(q);
+    card.style.display = match ? '' : 'none';
+  });
 }
 
 function defRowDone(d){
