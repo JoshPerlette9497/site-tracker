@@ -28,9 +28,8 @@ function computeRisk(u){
   if(u.riskOverride) return u.riskOverride;
   if(!u.lastWalkDate) return '🔴';
   const days = businessDaysBetween(u.lastWalkDate, todayISO());
-  if(days<=2) return '🟢';
-  if(days<=4) return '🟡';
-  if(days<=7) return '🟠';
+  if(days<1) return '🟢';
+  if(days<2) return '🟡';
   return '🔴';
 }
 
