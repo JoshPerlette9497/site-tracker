@@ -1,5 +1,6 @@
 /* ---------- modal ---------- */
 function showModal(html){
+  closeModal();
   const bg = document.createElement('div');
   bg.className='modal-bg'; bg.id='modalBg';
   bg.innerHTML = `<div class="modal" style="position:relative;"><button class="close" id="modalClose">×</button>${html}</div>`;

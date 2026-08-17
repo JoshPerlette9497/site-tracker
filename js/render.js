@@ -315,10 +315,44 @@ function openUnitModal(){
   };
 }
 
+function renderPhaseGroupRow(row){
+  const {gi,g,due,done,total,st} = row;
+  const isOpen = expandedGroupIds.has(gi.id);
+  let html = `<div class="card ${st}">
+    <div class="row pcg-toggle" data-giid="${gi.id}" style="cursor:pointer;">
+      <div>
+        <div class="item-name">${escapeHtml(g.name)}</div>
+        <div class="item-meta">${due?'due '+fmtDate(due):'no schedule match'} · ${done}/${total} done</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':st==='done'?'Done':'Open'}</span>
+        <span style="font-size:16px;">${isOpen?'▾':'▸'}</span>
+      </div>
+    </div>`;
+  if(isOpen){
+    html += `<div style="margin-top:10px;">`;
+    let lastSub = undefined;
+    for(const it of g.items){
+      if(it.subgroup !== lastSub){
+        html += `<div class="item-meta" style="font-weight:700; margin-top:8px;">${escapeHtml(it.subgroup||'')}</div>`;
+        lastSub = it.subgroup;
+      }
+      const checked = !!gi.itemStatus[it.id];
+      html += `<label style="display:flex; align-items:center; gap:8px; padding:5px 0; border-top:1px solid var(--line); font-size:13px;">
+        <input type="checkbox" class="pcg-item" data-giid="${gi.id}" data-itemid="${it.id}" ${checked?'checked':''} style="width:18px; height:18px; margin:0;">
+        <span style="${checked?'text-decoration:line-through; opacity:0.55;':''}">${escapeHtml(it.text)}</span>
+      </label>`;
+    }
+    html += `</div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
 function openUnitDetail(unitId){
   const u = state.units.find(x=>x.id===unitId);
   const insts = state.instances.filter(i=>i.unitId===unitId);
-  const defs = state.defs.filter(d=>d.location===u.name);
+  const defs = state.defs.filter(d=>d.location===u.name && d.status!=='Done');
   const risk = computeRisk(u);
   let html = `<h2>${escapeHtml(u.name)}</h2><div class="helptext">${escapeHtml(u.project)}</div><div class="divider"></div>`;
   html += `<div class="section-title" style="margin-top:0;">Round Info</div>`;
@@ -349,62 +383,8 @@ function openUnitDetail(unitId){
       </div>`;
     }
   }
-  html += `<div class="section-title">Phase Checklist</div>`;
-  const groupInsts = state.groupInstances.filter(gi=>gi.unitId===unitId);
-  const groupRows = groupInsts.map(gi=>{
-    const g = state.checklistGroups.find(x=>x.id===gi.groupId);
-    if(!g) return null;
-    const due = gi.dueOverride || groupDueDate(unitId, g);
-    const {done,total} = groupCompletion(gi, g);
-    const st = groupStatus(due, done, total);
-    return {gi, g, due, done, total, st};
-  }).filter(Boolean).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
-
-  for(const row of groupRows){
-    const {gi,g,due,done,total,st} = row;
-    const isOpen = expandedGroupIds.has(gi.id);
-    html += `<div class="card ${st}">
-      <div class="row pcg-toggle" data-giid="${gi.id}" style="cursor:pointer;">
-        <div>
-          <div class="item-name">${escapeHtml(g.name)}</div>
-          <div class="item-meta">${due?'due '+fmtDate(due):'no schedule match'} · ${done}/${total} done</div>
-        </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':st==='done'?'Done':'Open'}</span>
-          <span style="font-size:16px;">${isOpen?'▾':'▸'}</span>
-        </div>
-      </div>`;
-    if(isOpen){
-      html += `<div style="margin-top:10px;">`;
-      let lastSub = undefined;
-      for(const it of g.items){
-        if(it.subgroup !== lastSub){
-          html += `<div class="item-meta" style="font-weight:700; margin-top:8px;">${escapeHtml(it.subgroup||'')}</div>`;
-          lastSub = it.subgroup;
-        }
-        const checked = !!gi.itemStatus[it.id];
-        html += `<label style="display:flex; align-items:center; gap:8px; padding:5px 0; border-top:1px solid var(--line); font-size:13px;">
-          <input type="checkbox" class="pcg-item" data-giid="${gi.id}" data-itemid="${it.id}" ${checked?'checked':''} style="width:18px; height:18px; margin:0;">
-          <span style="${checked?'text-decoration:line-through; opacity:0.55;':''}">${escapeHtml(it.text)}</span>
-        </label>`;
-      }
-      html += `</div>`;
-    }
-    html += `</div>`;
-  }
-
-  html += `<div class="section-title">Ad-hoc Checklist</div>`;
-  for(const inst of insts){
-    const {m,due} = instanceInfo(inst);
-    if(!m) continue;
-    const st = dueStatus(due, inst.status);
-    html += `<div class="card ${st}"><div class="row"><div>
-      <div class="item-name">${escapeHtml(m.name)}</div>
-      <div class="item-meta">${escapeHtml(m.milestone)} · due ${fmtDate(due)}</div>
-      </div><span class="stamp ${st}">${st}</span></div></div>`;
-  }
   html += `<div class="section-title">Deficiencies<button class="btn small" id="udAddDefBtn">+ Add</button></div>`;
-  if(defs.length===0) html += `<div class="empty">None tied to this unit specifically.</div>`;
+  if(defs.length===0) html += `<div class="empty">None open for this unit.</div>`;
   const sortedDefs = defs.slice().sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
   for(const d of sortedDefs){
     const st = dueStatus(d.dueDate, d.status);
@@ -418,6 +398,44 @@ function openUnitDetail(unitId){
       </div>
     </div>`;
   }
+
+  html += `<div class="section-title">Phase Checklist</div>`;
+  const groupInsts = state.groupInstances.filter(gi=>gi.unitId===unitId);
+  const groupRows = groupInsts.map(gi=>{
+    const g = state.checklistGroups.find(x=>x.id===gi.groupId);
+    if(!g) return null;
+    const due = gi.dueOverride || groupDueDate(unitId, g);
+    const {done,total} = groupCompletion(gi, g);
+    const st = groupStatus(due, done, total);
+    return {gi, g, due, done, total, st};
+  }).filter(Boolean).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
+
+  const phaseCutoff = addDays(todayISO(), 14);
+  const dueSoonRows = groupRows.filter(r=>r.due && r.due<=phaseCutoff);
+  const laterRows = groupRows.filter(r=>!(r.due && r.due<=phaseCutoff));
+
+  for(const row of dueSoonRows){ html += renderPhaseGroupRow(row); }
+  if(dueSoonRows.length===0 && laterRows.length===0) html += `<div class="empty">No phase checklist groups yet.</div>`;
+  if(laterRows.length){
+    const overflowOpen = expandedPhaseOverflow.has(unitId);
+    html += `<div class="card phase-overflow-toggle" data-unitid="${unitId}" style="cursor:pointer;">
+      <div class="row"><div class="item-name" style="font-size:14px;">${overflowOpen?'▾':'▸'} ${laterRows.length} more (due later than 14 days, or no schedule match)</div></div>
+    </div>`;
+    if(overflowOpen){
+      for(const row of laterRows){ html += renderPhaseGroupRow(row); }
+    }
+  }
+
+  html += `<div class="section-title">Ad-hoc Checklist</div>`;
+  for(const inst of insts){
+    const {m,due} = instanceInfo(inst);
+    if(!m) continue;
+    const st = dueStatus(due, inst.status);
+    html += `<div class="card ${st}"><div class="row"><div>
+      <div class="item-name">${escapeHtml(m.name)}</div>
+      <div class="item-meta">${escapeHtml(m.milestone)} · due ${fmtDate(due)}</div>
+      </div><span class="stamp ${st}">${st}</span></div></div>`;
+  }
   showModal(html);
   document.getElementById('logRoundBtn').onclick = ()=>openRoundModal(unitId);
   document.getElementById('editWalkBtn').onclick = ()=>openEditWalkModal(unitId);
@@ -426,6 +444,11 @@ function openUnitDetail(unitId){
     if(expandedGroupIds.has(id)) expandedGroupIds.delete(id); else expandedGroupIds.add(id);
     openUnitDetail(unitId);
   });
+  const overflowToggle = document.querySelector('.phase-overflow-toggle');
+  if(overflowToggle) overflowToggle.onclick = ()=>{
+    if(expandedPhaseOverflow.has(unitId)) expandedPhaseOverflow.delete(unitId); else expandedPhaseOverflow.add(unitId);
+    openUnitDetail(unitId);
+  };
   document.querySelectorAll('.pcg-item').forEach(el=>el.onclick=async(e)=>{
     e.stopPropagation();
     const giid = el.dataset.giid, itemid = el.dataset.itemid;
