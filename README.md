@@ -20,10 +20,14 @@ Currently backed by Supabase (already set up):
 
 ## What to do first
 1. ~~Split `index.html` into a proper structure.~~ Done — see file layout below.
-2. Initialize git, create a GitHub repo, push.
-3. Connect Netlify to the GitHub repo for auto-deploy on push (replacing manual Netlify Drop).
+2. ~~Initialize git, create a GitHub repo, push.~~ Done — private repo at [JoshPerlette9497/site-tracker](https://github.com/JoshPerlette9497/site-tracker).
+3. ~~Connect Netlify to the GitHub repo for auto-deploy on push.~~ Done — [slokker-site-log.netlify.app](https://slokker-site-log.netlify.app) (private), auto-deploys from `master` on every push.
 4. Keep the Supabase connection exactly as-is — don't recreate the database or table.
 5. Preserve the PWA manifest + service worker setup so installability keeps working.
+
+## Deployment
+- **GitHub**: private repo `JoshPerlette9497/site-tracker`, default branch `master`.
+- **Netlify**: project `slokker-site-log`, deploys from GitHub on every push to `master`. No build command — this is a static site (base directory, build command, and publish directory are all left at their defaults/root). Currently a private Netlify project (only team members can view); use "Make public" in the Netlify UI if Josh wants the URL shareable without a Netlify login.
 
 ## Files in this folder
 - `index.html` — HTML shell only (header, tab nav, `<main>` mount point); loads `style.css` and the `js/` modules
