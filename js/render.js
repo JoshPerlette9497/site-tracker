@@ -162,7 +162,7 @@ function wireCardActions(){
 }
 
 function renderUnits(){
-  let html = `<div class="section-title">Units<button class="btn small" id="addUnitBtn">+ Add Unit</button></div>`;
+  let html = `<div class="section-title">Units<div style="display:flex; gap:6px;"><button class="btn small ghost" id="bulkWalkBtn">Set Walk Date</button><button class="btn small" id="addUnitBtn">+ Add Unit</button></div></div>`;
   const byProject = {};
   for(const u of state.units){ (byProject[u.project]=byProject[u.project]||[]).push(u); }
   const riskOrder = {'🔴':0,'🟠':1,'🟡':2,'🟢':3};
@@ -188,10 +188,30 @@ function renderUnits(){
   }
   app.innerHTML = html;
   document.getElementById('addUnitBtn').onclick = ()=>openUnitModal();
+  document.getElementById('bulkWalkBtn').onclick = ()=>openBulkWalkModal();
   document.querySelectorAll('[data-unit] .unit-open').forEach(b=>b.onclick=(e)=>{
     const id = e.target.closest('[data-unit]').dataset.unit;
     openUnitDetail(id);
   });
+}
+
+function openBulkWalkModal(){
+  showModal(`
+    <h2>Set Walk Date — All Units</h2>
+    <div class="helptext" style="margin-bottom:6px;">Sets Last Walk Date for every unit. Does not log a round or change phase/trade info.</div>
+    <label>Walk Date</label><input id="bwDate" type="date" value="${todayISO()}">
+    <div class="divider"></div>
+    <button class="btn" id="bwSave" style="width:100%;">Apply to All Units</button>
+  `);
+  document.getElementById('bwSave').onclick = async()=>{
+    const date = document.getElementById('bwDate').value;
+    if(!date) return;
+    state.units.forEach(u=>u.lastWalkDate=date);
+    await sset('units', state.units);
+    closeModal();
+    showToast(`Set walk date to ${fmtDate(date)} for ${state.units.length} units`);
+    render();
+  };
 }
 
 function openUnitModal(){
@@ -225,7 +245,12 @@ function openUnitDetail(unitId){
     <div class="row" style="margin-top:6px;"><div class="item-meta">Current Trade</div><div style="font-size:13px;">${escapeHtml(u.crntTrade||'—')}</div></div>
     <div class="row" style="margin-top:6px;"><div class="item-meta">Trade End</div><div style="font-size:13px;">${fmtDate(u.ctEnd)}</div></div>
     <div class="row" style="margin-top:6px;"><div class="item-meta">Next Trade</div><div style="font-size:13px;">${escapeHtml(u.nextTrade||'—')}</div></div>
-    <div class="row" style="margin-top:6px;"><div class="item-meta">Last Walk</div><div style="font-size:13px;">${u.lastWalkDate?fmtDate(u.lastWalkDate):'Never'}</div></div>
+    <div class="row" style="margin-top:6px;"><div class="item-meta">Last Walk</div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <span style="font-size:13px;">${u.lastWalkDate?fmtDate(u.lastWalkDate):'Never'}</span>
+        <button class="btn small ghost" id="editWalkBtn">Edit</button>
+      </div>
+    </div>
     <button class="btn" id="logRoundBtn" style="width:100%; margin-top:10px;">Log Round</button>
   </div>`;
   const history = state.roundHistory.filter(r=>r.unitId===unitId).slice().sort((a,b)=>b.date.localeCompare(a.date));
@@ -312,6 +337,7 @@ function openUnitDetail(unitId){
   }
   showModal(html);
   document.getElementById('logRoundBtn').onclick = ()=>openRoundModal(unitId);
+  document.getElementById('editWalkBtn').onclick = ()=>openEditWalkModal(unitId);
   document.querySelectorAll('.pcg-toggle').forEach(el=>el.onclick=()=>{
     const id = el.dataset.giid;
     if(expandedGroupIds.has(id)) expandedGroupIds.delete(id); else expandedGroupIds.add(id);
@@ -349,6 +375,24 @@ function openUnitDetail(unitId){
       openUnitDetail(unitId);
     });
   });
+}
+
+function openEditWalkModal(unitId){
+  const u = state.units.find(x=>x.id===unitId);
+  showModal(`
+    <h2>Edit Walk Date — ${escapeHtml(u.name)}</h2>
+    <div class="helptext" style="margin-bottom:6px;">Only changes Last Walk Date. Does not log a round or change phase/trade info.</div>
+    <label>Last Walk Date</label><input id="ewDate" type="date" value="${u.lastWalkDate||''}">
+    <div class="divider"></div>
+    <button class="btn" id="ewSave" style="width:100%;">Save</button>
+  `);
+  document.getElementById('ewSave').onclick = async()=>{
+    u.lastWalkDate = document.getElementById('ewDate').value || null;
+    await sset('units', state.units);
+    closeModal();
+    showToast('Walk date updated for ' + u.name);
+    openUnitDetail(unitId);
+  };
 }
 
 function openRoundModal(unitId){
