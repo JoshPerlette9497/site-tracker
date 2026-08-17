@@ -1,0 +1,7 @@
+# Real production data — not for the repo
+seed_data.sql
+sitelog-backup-*.json
+
+# OS / editor junk
+.DS_Store
+Thumbs.db

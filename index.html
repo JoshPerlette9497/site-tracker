@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
+<title>Site Log</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1F5C60">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Site Log">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <h1 id="headerTitle">Site Log</h1>
+  <div class="sub" id="headerSub">—</div>
+</header>
+
+<main id="app"></main>
+
+<nav class="tabs">
+  <button data-tab="today" class="active"><span class="tab-icon">◎</span>Today</button>
+  <button data-tab="brief"><span class="tab-icon">◈</span>Brief</button>
+  <button data-tab="units"><span class="tab-icon">▦</span>Units</button>
+  <button data-tab="master"><span class="tab-icon">☰</span>Checklist</button>
+  <button data-tab="defs"><span class="tab-icon">⚑</span>Deficiencies</button>
+  <button data-tab="schedule"><span class="tab-icon">▤</span>Schedule</button>
+  <button data-tab="log"><span class="tab-icon">▥</span>Log</button>
+  <button data-tab="sync"><span class="tab-icon">↻</span>Sync</button>
+</nav>
+
+<script src="js/storage.js"></script>
+<script src="js/dialogs.js"></script>
+<script src="js/modal.js"></script>
+<script src="js/data.js"></script>
+<script src="js/render.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
