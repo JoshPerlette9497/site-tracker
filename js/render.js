@@ -384,19 +384,28 @@ function openUnitDetail(unitId){
     }
   }
   html += `<div class="section-title">Deficiencies<button class="btn small" id="udAddDefBtn">+ Add</button></div>`;
-  if(defs.length===0) html += `<div class="empty">None open for this unit.</div>`;
-  const sortedDefs = defs.slice().sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
-  for(const d of sortedDefs){
-    const st = dueStatus(d.dueDate, d.status);
-    html += `<div class="card ${st} uddef-card" data-uddef="${d.id}" style="cursor:pointer;"><div class="row"><div>
-      <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.owner||'Unassigned')} · ${d.status}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${priorityTag(d)}</div>
-      </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
-      <div class="row" style="margin-top:8px; gap:6px;">
-        <button class="btn small done-btn ud-def-done">Mark Done</button>
-        <button class="btn small danger ud-def-remove">Remove</button>
-      </div>
+  if(defs.length===0){
+    html += `<div class="empty">None open for this unit.</div>`;
+  } else {
+    const defsOpen = expandedUnitDefs.has(unitId);
+    html += `<div class="card def-list-toggle" data-unitid="${unitId}" style="cursor:pointer;">
+      <div class="row"><div class="item-name" style="font-size:14px;">${defsOpen?'▾':'▸'} ${defs.length} open deficienc${defs.length===1?'y':'ies'}</div></div>
     </div>`;
+    if(defsOpen){
+      const sortedDefs = defs.slice().sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999'));
+      for(const d of sortedDefs){
+        const st = dueStatus(d.dueDate, d.status);
+        html += `<div class="card ${st} uddef-card" data-uddef="${d.id}" style="cursor:pointer;"><div class="row"><div>
+          <div class="item-name">${escapeHtml(d.description)}</div>
+          <div class="item-meta">${escapeHtml(d.owner||'Unassigned')} · ${d.status}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${priorityTag(d)}</div>
+          </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
+          <div class="row" style="margin-top:8px; gap:6px;">
+            <button class="btn small done-btn ud-def-done">Mark Done</button>
+            <button class="btn small danger ud-def-remove">Remove</button>
+          </div>
+        </div>`;
+      }
+    }
   }
 
   html += `<div class="section-title">Phase Checklist</div>`;
@@ -447,6 +456,11 @@ function openUnitDetail(unitId){
   const overflowToggle = document.querySelector('.phase-overflow-toggle');
   if(overflowToggle) overflowToggle.onclick = ()=>{
     if(expandedPhaseOverflow.has(unitId)) expandedPhaseOverflow.delete(unitId); else expandedPhaseOverflow.add(unitId);
+    openUnitDetail(unitId);
+  };
+  const defListToggle = document.querySelector('.def-list-toggle');
+  if(defListToggle) defListToggle.onclick = ()=>{
+    if(expandedUnitDefs.has(unitId)) expandedUnitDefs.delete(unitId); else expandedUnitDefs.add(unitId);
     openUnitDetail(unitId);
   };
   document.querySelectorAll('.pcg-item').forEach(el=>el.onclick=async(e)=>{

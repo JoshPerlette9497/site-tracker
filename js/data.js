@@ -82,6 +82,7 @@ let selectedScheduleUnit = null;
 let selectedLogDate = null;
 let expandedGroupIds = new Set();
 let expandedPhaseOverflow = new Set();
+let expandedUnitDefs = new Set();
 let defsFilterTab = 'dated';
 let logSearchQuery = null;
 let defSearchQuery = '';
