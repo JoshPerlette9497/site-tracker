@@ -101,6 +101,10 @@ const LOG_HISTORY_SEED = [
 ];
 
 async function loadAll(){
+  // Daily physical-task time budget, in minutes, for Josh-owned deficiencies only.
+  // Trade-owned deficiencies don't count against it — those are rounds/follow-up
+  // checks on work the trades do, not tasks Josh personally has to complete.
+  state.dailyAllowanceMinutes = await sget('dailyAllowanceMinutes', 180);
   state.units = await sget('units', DEFAULT_UNITS);
   state.master = await sget('master', DEFAULT_MASTER);
   state.instances = await sget('instances', null);
