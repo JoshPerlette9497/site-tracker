@@ -19,7 +19,7 @@ async function sget(key, fallback){
 }
 async function sset(key, value){
   try{
-    await fetch(`${SUPABASE_URL}/rest/v1/app_data`, {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_data`, {
       method: 'POST',
       headers: {
         apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
@@ -29,7 +29,17 @@ async function sset(key, value){
       },
       body: JSON.stringify({key, value: JSON.stringify(value), updated_at: new Date().toISOString()})
     });
-  }catch(e){ console.error('storage set failed', key, e); }
+    if(!res.ok){
+      console.error('storage set failed', key, res.status, await res.text().catch(()=>''));
+      if(typeof showToast==='function') showToast(`Couldn't save "${key}" — check your connection and try again.`);
+      return false;
+    }
+    return true;
+  }catch(e){
+    console.error('storage set failed', key, e);
+    if(typeof showToast==='function') showToast(`Couldn't save "${key}" — check your connection and try again.`);
+    return false;
+  }
 }
 function uid(){ return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
 function todayISO(){ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
