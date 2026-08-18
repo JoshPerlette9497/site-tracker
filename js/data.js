@@ -90,6 +90,7 @@ let defSearchQuery = '';
 let defMissingEstimateOnly = false;
 let defOwnerFilter = 'all';
 let unitSearchQuery = '';
+let inactiveUnitsExpanded = false;
 
 const LOG_HISTORY_SEED = [
 {date:'2026-08-04', content:"**AB03:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Josh corrected three undersized door openings in unit 2234 and 2236 basements same-day. CSM Flooring scheduled Fri 8/7 to level unit 2234 basement floor.\n**AB04:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Basement development for unit 2240 underway: IPD completed today, plumbers rough-in/finish tomorrow, HVAC rough-in 8/6, floor leveling 8/7, electrical rough-in 8/10, full inspection 8/11.\n**AB16:** Painters on site, finishing 8/6. CSM Flooring up next, 8/7–8/14.\n**AB17:** Plumbing final on site, finishing 8/6; HVAC final up next. Added deficiencies to verify shelves/mirrors installed and install Slokker Homes powder room mirror.\n**JB01:** Still waiting on permit to begin construction; following up with office/Scott on 8/7.\n**JB12:** No activity change. Following up with C+J Co on NC rate for slab pour.\n**JB20:** No activity change.\n**Site-wide:** Curb stop walk completed — deficiencies logged for AB02/06/07/08/11/12 and AB13–18. Punch list added: bollard light bases, bollard lights install, city sidewalk/81st St/AB18 path."},
@@ -309,7 +310,7 @@ function buildSuggestedPlan(){
   const budget = state.dailyAllowanceMinutes || 180;
 
   const defCandidates = state.defs
-    .filter(d=>d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=today)
+    .filter(d=>d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=today && isUnitActiveByLocation(d.location))
     .map(d=>({
       type:'def', due:d.dueDate, priority:d.priority||'Medium', category:d.category||'Construction',
       minutes: d.estimatedMinutes || PLAN_DEFAULT_ESTIMATE,
@@ -353,7 +354,7 @@ function buildSuggestedPlan(){
 
   // Trade-owned deficiencies due today: never budgeted or ranked against Josh's
   // own time, but still worth surfacing so today's rounds/follow-ups are visible.
-  const tradeToday = state.defs.filter(d=>d.status!=='Done' && d.owner==='Trade' && d.dueDate===today);
+  const tradeToday = state.defs.filter(d=>d.status!=='Done' && d.owner==='Trade' && d.dueDate===today && isUnitActiveByLocation(d.location));
 
   return {selected, deferred, tradeToday, used, budget};
 }
@@ -382,6 +383,21 @@ function instanceInfo(inst){
   const u = state.units.find(x=>x.id===inst.unitId);
   const due = inst.dueOverride || (m ? computeDueDate(inst.unitId, m) : null);
   return {m,u,due};
+}
+
+/* Deficiencies are matched to units by name (d.location), not unitId, so a
+   missing unit (name typo, or never added) is treated as active — don't
+   let a lookup miss silently hide someone's open item. */
+function isUnitActiveByLocation(location){
+  const u = state.units.find(x=>x.name===location);
+  return !u || u.active!==false;
+}
+
+async function setUnitActive(unitId, active){
+  const u = state.units.find(x=>x.id===unitId);
+  if(!u) return;
+  u.active = active;
+  await sset('units', state.units);
 }
 
 function dueStatus(due, status){

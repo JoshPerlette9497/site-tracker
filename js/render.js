@@ -24,7 +24,7 @@ function renderBrief(){
   const today = todayISO();
   const tomorrow = addDays(today, 1);
 
-  const openDefs = state.defs.filter(d=>d.status!=='Done');
+  const openDefs = state.defs.filter(d=>d.status!=='Done' && isUnitActiveByLocation(d.location));
   const plan = buildSuggestedPlan();
   const tradeDueSoon = openDefs.filter(d=>d.owner==='Trade' && d.dueDate && d.dueDate<=tomorrow);
   const tradeOpenNoDue = openDefs.filter(d=>d.owner==='Trade' && !d.dueDate);
@@ -33,7 +33,7 @@ function renderBrief(){
   const checklistOverdue = [], checklistDueToday = [], checklistCompletedToday = [];
   for(const inst of state.instances){
     const {m,u,due} = instanceInfo(inst);
-    if(!m||!u) continue;
+    if(!m||!u||!u.active) continue;
     if(inst.status==='Done' && inst.completedDate===today) checklistCompletedToday.push(`${u.name}: ${m.name}`);
     else if(due===today) checklistDueToday.push(`${u.name}: ${m.name}`);
     else if(due && due<today && inst.status!=='Done') checklistOverdue.push(`${u.name}: ${m.name}`);
@@ -84,11 +84,11 @@ function renderBrief(){
 function renderToday(){
   const rows = state.instances.map(inst=>{
     const {m,u,due} = instanceInfo(inst);
-    if(!m||!u) return null;
+    if(!m||!u||!u.active) return null;
     return {inst,m,u,due,st:dueStatus(due, inst.status)};
   }).filter(Boolean).filter(r=>r.st==='overdue'||r.st==='today');
 
-  const defRows = state.defs.filter(d=>d.status!=='Done').map(d=>{
+  const defRows = state.defs.filter(d=>d.status!=='Done' && isUnitActiveByLocation(d.location)).map(d=>{
     return {d,st:dueStatus(d.dueDate, d.status)};
   }).filter(r=>r.st==='overdue'||r.st==='today');
 
@@ -300,31 +300,46 @@ function wireCardActions(){
   });
 }
 
+function unitCard(u){
+  const insts = state.instances.filter(i=>i.unitId===u.id);
+  const openCount = insts.filter(i=>i.status!=='Done').length;
+  const defCount = state.defs.filter(d=>d.location===u.name && d.status!=='Done').length;
+  const risk = computeRisk(u);
+  return `<div class="card" data-unit="${u.id}">
+    <div class="row">
+      <div>
+        <div class="item-name">${risk} ${escapeHtml(u.name)}${u.active?'':' (inactive)'}</div>
+        <div class="item-meta">${openCount} open checklist · ${defCount} open deficiencies${u.currentPhase?' · '+escapeHtml(u.currentPhase):''}</div>
+        <div class="item-meta">${u.lastWalkDate? 'Last walk '+fmtDate(u.lastWalkDate) : 'Never walked'}</div>
+      </div>
+      <button class="btn small ghost unit-open">Open</button>
+    </div>
+  </div>`;
+}
+
 function renderUnits(){
   let html = `<div class="section-title">Units<div style="display:flex; gap:6px;"><button class="btn small ghost" id="bulkWalkBtn">Set Walk Date</button><button class="btn small" id="addUnitBtn">+ Add Unit</button></div></div>`;
   html += `<input id="unitSearchInput" placeholder="Search units…" value="${escapeHtml(unitSearchQuery)}" style="margin:8px 4px 4px; width:calc(100% - 8px);">`;
+  const activeUnits = state.units.filter(u=>u.active);
+  const inactiveUnits = state.units.filter(u=>!u.active);
   const byProject = {};
-  for(const u of state.units){ (byProject[u.project]=byProject[u.project]||[]).push(u); }
+  for(const u of activeUnits){ (byProject[u.project]=byProject[u.project]||[]).push(u); }
   const riskOrder = {'🔴':0,'🟠':1,'🟡':2,'🟢':3};
   for(const proj in byProject){
     html += `<div class="unit-group" data-project="${escapeHtml(proj)}">`;
     html += `<div style="margin:10px 4px 4px; color:var(--ink-dim); font-size:12px; font-weight:700;">${escapeHtml(proj)}</div>`;
     const sorted = byProject[proj].slice().sort((a,b)=>riskOrder[computeRisk(a)]-riskOrder[computeRisk(b)]);
-    for(const u of sorted){
-      const insts = state.instances.filter(i=>i.unitId===u.id);
-      const openCount = insts.filter(i=>i.status!=='Done').length;
-      const defCount = state.defs.filter(d=>d.location===u.name && d.status!=='Done').length;
-      const risk = computeRisk(u);
-      html += `<div class="card" data-unit="${u.id}">
-        <div class="row">
-          <div>
-            <div class="item-name">${risk} ${escapeHtml(u.name)}${u.active?'':' (inactive)'}</div>
-            <div class="item-meta">${openCount} open checklist · ${defCount} open deficiencies${u.currentPhase?' · '+escapeHtml(u.currentPhase):''}</div>
-            <div class="item-meta">${u.lastWalkDate? 'Last walk '+fmtDate(u.lastWalkDate) : 'Never walked'}</div>
-          </div>
-          <button class="btn small ghost unit-open">Open</button>
-        </div>
-      </div>`;
+    for(const u of sorted){ html += unitCard(u); }
+    html += `</div>`;
+  }
+  if(inactiveUnits.length){
+    html += `<div class="unit-group" data-project="__inactive">`;
+    html += `<div class="card inactive-units-toggle" style="cursor:pointer;">
+      <div class="row"><div class="item-name" style="font-size:14px;">${inactiveUnitsExpanded?'▾':'▸'} Completed / Inactive Units<span class="pill">${inactiveUnits.length}</span></div></div>
+    </div>`;
+    if(inactiveUnitsExpanded){
+      const sorted = inactiveUnits.slice().sort((a,b)=>a.name.localeCompare(b.name));
+      for(const u of sorted){ html += unitCard(u); }
     }
     html += `</div>`;
   }
@@ -335,6 +350,8 @@ function renderUnits(){
     unitSearchQuery = e.target.value;
     applyUnitSearchFilter();
   };
+  const inactiveToggle = document.querySelector('.inactive-units-toggle');
+  if(inactiveToggle) inactiveToggle.onclick = ()=>{ inactiveUnitsExpanded = !inactiveUnitsExpanded; render(); };
   document.querySelectorAll('[data-unit] .unit-open').forEach(b=>b.onclick=(e)=>{
     const id = e.target.closest('[data-unit]').dataset.unit;
     openUnitDetail(id);
@@ -345,8 +362,10 @@ function renderUnits(){
 function applyUnitSearchFilter(){
   const q = (unitSearchQuery||'').trim().toLowerCase();
   document.querySelectorAll('.unit-group').forEach(group=>{
+    const cards = group.querySelectorAll('[data-unit]');
+    if(cards.length===0){ group.style.display = ''; return; } // e.g. collapsed inactive-units toggle, nothing to search yet
     let anyVisible = false;
-    group.querySelectorAll('[data-unit]').forEach(card=>{
+    cards.forEach(card=>{
       const match = !q || card.textContent.toLowerCase().includes(q);
       card.style.display = match ? '' : 'none';
       if(match) anyVisible = true;
@@ -433,7 +452,9 @@ function openUnitDetail(unitId){
   const insts = state.instances.filter(i=>i.unitId===unitId);
   const defs = state.defs.filter(d=>d.location===u.name && d.status!=='Done');
   const risk = computeRisk(u);
-  let html = `<h2>${escapeHtml(u.name)}</h2><div class="helptext">${escapeHtml(u.project)}</div><div class="divider"></div>`;
+  let html = `<div class="row"><div><h2 style="margin-bottom:0;">${escapeHtml(u.name)}</h2><div class="helptext">${escapeHtml(u.project)}${u.active?'':' · inactive'}</div></div>
+    <button class="btn small ghost" id="unitArchiveBtn">${u.active?'Mark Complete':'Reactivate'}</button>
+  </div><div class="divider"></div>`;
   html += `<div class="section-title" style="margin-top:0;">Round Info</div>`;
   html += `<div class="card">
     <div class="row"><div class="item-meta">Risk</div><div>${risk}${u.riskOverride?' (manual override)':' (auto)'}</div></div>
@@ -529,6 +550,22 @@ function openUnitDetail(unitId){
   if(newModal) newModal.scrollTop = prevScrollTop;
   document.getElementById('logRoundBtn').onclick = ()=>openRoundModal(unitId);
   document.getElementById('editWalkBtn').onclick = ()=>openEditWalkModal(unitId);
+  document.getElementById('unitArchiveBtn').onclick = ()=>{
+    if(u.active){
+      closeModal();
+      showConfirm(`Mark ${u.name} complete? It'll drop out of daily checks and the Suggested Plan, but its round history and deficiencies stay on record — you can reactivate it any time.`, async()=>{
+        await setUnitActive(unitId, false);
+        showToast(`${u.name} marked complete.`);
+        openUnitDetail(unitId);
+      });
+    } else {
+      (async()=>{
+        await setUnitActive(unitId, true);
+        showToast(`${u.name} reactivated.`);
+        openUnitDetail(unitId);
+      })();
+    }
+  };
   document.querySelectorAll('.pcg-toggle').forEach(el=>el.onclick=()=>{
     const id = el.dataset.giid;
     if(expandedGroupIds.has(id)) expandedGroupIds.delete(id); else expandedGroupIds.add(id);
