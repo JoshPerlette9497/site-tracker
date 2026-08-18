@@ -721,6 +721,12 @@ function renderDefs(){
     Missing estimate only
   </label>`;
 
+  html += `<div style="display:flex; gap:6px; margin:10px 4px 0;">
+    <button class="btn small def-owner-pick ${defOwnerFilter==='all'?'':'ghost'}" data-owner="all" style="flex:1;">All</button>
+    <button class="btn small def-owner-pick ${defOwnerFilter==='josh'?'':'ghost'}" data-owner="josh" style="flex:1;">Mine</button>
+    <button class="btn small def-owner-pick ${defOwnerFilter==='trade'?'':'ghost'}" data-owner="trade" style="flex:1;">Trade</button>
+  </div>`;
+
   html += `<div style="display:flex; gap:6px; margin:10px 4px 14px;">
     <button class="btn small defs-filter-pick ${defsFilterTab==='dated'?'':'ghost'}" data-filter="dated" style="flex:1;">Due Date <span class="pill">${dated.length}</span></button>
     <button class="btn small defs-filter-pick ${defsFilterTab==='undated'?'':'ghost'}" data-filter="undated" style="flex:1;">No Date <span class="pill">${undated.length}</span></button>
@@ -755,6 +761,10 @@ function renderDefs(){
     defsFilterTab = b.dataset.filter;
     render();
   });
+  document.querySelectorAll('.def-owner-pick').forEach(b=>b.onclick=()=>{
+    defOwnerFilter = b.dataset.owner;
+    render();
+  });
   wireDefRowActions();
   applyDefSearchFilter();
 }
@@ -764,7 +774,10 @@ function applyDefSearchFilter(){
   document.querySelectorAll('#defsListContainer > div').forEach(card=>{
     const matchesSearch = !q || card.textContent.toLowerCase().includes(q);
     const matchesEstimate = !defMissingEstimateOnly || (card.dataset.hasestimate==='0' && card.dataset.owner!=='Trade');
-    card.style.display = (matchesSearch && matchesEstimate) ? '' : 'none';
+    const matchesOwner = defOwnerFilter==='all'
+      || (defOwnerFilter==='josh' && card.dataset.owner==='Josh')
+      || (defOwnerFilter==='trade' && card.dataset.owner==='Trade');
+    card.style.display = (matchesSearch && matchesEstimate && matchesOwner) ? '' : 'none';
   });
 }
 

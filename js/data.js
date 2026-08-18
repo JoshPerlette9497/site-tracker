@@ -88,6 +88,7 @@ let defsFilterTab = 'dated';
 let logSearchQuery = null;
 let defSearchQuery = '';
 let defMissingEstimateOnly = false;
+let defOwnerFilter = 'all';
 let unitSearchQuery = '';
 
 const LOG_HISTORY_SEED = [
