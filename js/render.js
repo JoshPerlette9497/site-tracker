@@ -686,6 +686,10 @@ function renderDefs(){
   let html = `<div class="section-title">Deficiencies<span><button class="btn small ghost" id="importDefBtn">Import</button> <button class="btn small" id="addDefBtn">+ Add</button></span></div>`;
 
   html += `<input id="defSearchInput" placeholder="Search deficiencies…" value="${escapeHtml(defSearchQuery)}" style="margin:8px 4px 0; width:calc(100% - 8px);">`;
+  html += `<label style="display:flex; align-items:center; gap:6px; margin:8px 4px 0; text-transform:none; letter-spacing:normal; font-size:13px; color:var(--ink);">
+    <input type="checkbox" id="defMissingEstimateToggle" ${defMissingEstimateOnly?'checked':''} style="width:16px; height:16px; margin:0;">
+    Missing estimate only
+  </label>`;
 
   html += `<div style="display:flex; gap:6px; margin:10px 4px 14px;">
     <button class="btn small defs-filter-pick ${defsFilterTab==='dated'?'':'ghost'}" data-filter="dated" style="flex:1;">Due Date <span class="pill">${dated.length}</span></button>
@@ -713,6 +717,10 @@ function renderDefs(){
     defSearchQuery = e.target.value;
     applyDefSearchFilter();
   };
+  document.getElementById('defMissingEstimateToggle').onchange = (e)=>{
+    defMissingEstimateOnly = e.target.checked;
+    applyDefSearchFilter();
+  };
   document.querySelectorAll('.defs-filter-pick').forEach(b=>b.onclick=()=>{
     defsFilterTab = b.dataset.filter;
     render();
@@ -724,13 +732,14 @@ function renderDefs(){
 function applyDefSearchFilter(){
   const q = (defSearchQuery||'').trim().toLowerCase();
   document.querySelectorAll('#defsListContainer > div').forEach(card=>{
-    const match = !q || card.textContent.toLowerCase().includes(q);
-    card.style.display = match ? '' : 'none';
+    const matchesSearch = !q || card.textContent.toLowerCase().includes(q);
+    const matchesEstimate = !defMissingEstimateOnly || card.dataset.hasestimate==='0';
+    card.style.display = (matchesSearch && matchesEstimate) ? '' : 'none';
   });
 }
 
 function defRowDone(d){
-  return `<div class="card done def2-card" data-def2="${d.id}" style="cursor:pointer;">
+  return `<div class="card done def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
       <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}${categoryTag(d)}</div>
@@ -740,7 +749,7 @@ function defRowDone(d){
 
 function defRowWithActions(d, showDatePicker){
   const st = dueStatus(d.dueDate, d.status);
-  return `<div class="card ${st} def2-card" data-def2="${d.id}" style="cursor:pointer;">
+  return `<div class="card ${st} def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
       <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${priorityTag(d)}${categoryTag(d)}</div>
@@ -749,7 +758,10 @@ function defRowWithActions(d, showDatePicker){
       <input type="date" class="def-quickdate" style="margin-top:0;">
       <button class="btn small def-savedate">Set Date</button>
     </div>` : ''}
-    <div class="row" style="margin-top:8px;"><button class="btn small done-btn def2-done">Mark Done</button></div>
+    <div class="row" style="margin-top:8px; gap:6px;">
+      <select class="def-quickestimate" style="margin-top:0;">${estimateOptionsHtml(d.estimatedMinutes)}</select>
+      <button class="btn small done-btn def2-done">Mark Done</button>
+    </div>
   </div>`;
 }
 
@@ -775,6 +787,20 @@ function wireDefRowActions(){
     render();
   });
   document.querySelectorAll('.def-quickdate').forEach(el=>el.onclick=(e)=>e.stopPropagation());
+  document.querySelectorAll('.def-quickestimate').forEach(el=>{
+    el.onclick=(e)=>e.stopPropagation();
+    el.onchange=async(e)=>{
+      const card = e.target.closest('[data-def2]');
+      const id = card.dataset.def2;
+      const d2 = state.defs.find(d=>d.id===id);
+      if(!d2) return;
+      const val = e.target.value;
+      d2.estimatedMinutes = val ? Number(val) : null;
+      card.dataset.hasestimate = val ? '1' : '0';
+      await sset('defs', state.defs);
+      applyDefSearchFilter();
+    };
+  });
   document.querySelectorAll('.def2-card').forEach(card=>card.onclick=(e)=>{
     if(e.target.closest('button, input')) return;
     openEditDefModal(card.dataset.def2, render);

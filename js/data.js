@@ -87,6 +87,7 @@ let expandedUnitDefs = new Set();
 let defsFilterTab = 'dated';
 let logSearchQuery = null;
 let defSearchQuery = '';
+let defMissingEstimateOnly = false;
 let unitSearchQuery = '';
 
 const LOG_HISTORY_SEED = [
