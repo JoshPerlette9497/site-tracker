@@ -45,6 +45,7 @@ function renderBrief(){
   let html = `<div class="section-title">Daily Brief — ${fmtDate(today)}</div>`;
 
   html += renderAiPlanSection(plan);
+  html += renderUpcomingScheduleSection();
 
   html += `<div class="section-title">Trade — Due Today/Tomorrow<span class="pill">${tradeDueSoon.length}</span></div>`;
   html += tradeDueSoon.length ? tradeDueSoon.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">None due soon.</div>`;
@@ -127,8 +128,13 @@ function planDeferredRow(t){
         <div class="item-name">${escapeHtml(info.name)}</div>
         <div class="item-meta">${escapeHtml(info.site||'—')}${info.due?' · due '+fmtDate(info.due):''}</div>
         ${t.reason?`<div class="item-meta" style="font-style:italic;">${escapeHtml(t.reason)}</div>`:''}
+        ${info.plannedDate?`<div class="item-meta">You planned this for ${fmtDate(info.plannedDate)} · <a href="#" class="plan-clear-date">clear</a></div>`:''}
       </div>
       <button class="btn small ghost plan-bring-in">Bring into today</button>
+    </div>
+    <div class="row" style="margin-top:8px; gap:6px;">
+      <input type="date" class="plan-quickdate" style="margin-top:0;" min="${addDays(todayISO(),1)}" value="${info.plannedDate||''}">
+      <button class="btn small plan-savedate">Schedule</button>
     </div>
   </div>`;
 }
@@ -171,7 +177,52 @@ function renderAiPlanSection(fallbackPlan){
   return html;
 }
 
+/* The forward-looking schedule Josh builds by hand over time, one "Schedule"
+   tap at a time from the deferred list above - never written by the agent,
+   never touches a real due date. Grouped by day so it reads like an actual
+   plan, not just a pile of dated tasks. */
+function renderUpcomingScheduleSection(){
+  const items = upcomingPlannedTasks();
+  if(items.length===0) return '';
+  let html = `<div class="section-title" style="margin-top:14px;">Your Upcoming Schedule<span class="pill">${items.length}</span></div>`;
+  let lastDate = null;
+  for(const it of items){
+    if(it.plannedDate !== lastDate){
+      html += `<div class="item-meta" style="font-weight:700; margin:8px 4px 2px;">${fmtDate(it.plannedDate)}</div>`;
+      lastDate = it.plannedDate;
+    }
+    html += `<div class="card" data-planid="${escapeHtml(it.id)}">
+      <div class="row"><div>
+        <div class="item-name">${escapeHtml(it.name)}</div>
+        <div class="item-meta">${escapeHtml(it.site||'—')}</div>
+      </div>
+      <a href="#" class="plan-clear-date" style="font-size:12px;">clear</a>
+      </div>
+    </div>`;
+  }
+  return html;
+}
+
 function wireAiPlanActions(){
+  // These two apply whether or not today's AI plan exists - the upcoming
+  // schedule Josh builds by hand persists independent of any given day's plan.
+  document.querySelectorAll('.plan-savedate').forEach(b=>b.onclick=async(e)=>{
+    const card = e.target.closest('[data-planid]');
+    const id = card.dataset.planid;
+    const val = card.querySelector('.plan-quickdate').value;
+    if(!val){ showToast('Pick a date first.'); return; }
+    await setPlannedDate(id, val);
+    showToast('Scheduled.');
+    render();
+  });
+  document.querySelectorAll('.plan-quickdate').forEach(el=>el.onclick=(e)=>e.stopPropagation());
+  document.querySelectorAll('.plan-clear-date').forEach(a=>a.onclick=async(e)=>{
+    e.preventDefault();
+    const id = e.target.closest('[data-planid]').dataset.planid;
+    await clearPlannedDate(id);
+    render();
+  });
+
   if(!planDraft) return;
   document.querySelectorAll('.plan-up').forEach(b=>b.onclick=(e)=>{
     const id = e.target.closest('[data-planid]').dataset.planid;
@@ -296,7 +347,7 @@ function cardForDef(d, st){
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(d.description)}</div>
-        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${priorityTag(d)}${categoryTag(d)}</div>
+        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${priorityTag(d)}${categoryTag(d)}</div>
       </div>
       <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>
@@ -981,7 +1032,7 @@ function defRowWithActions(d, showDatePicker){
   return `<div class="card ${st} def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" data-owner="${escapeHtml(d.owner||'')}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${priorityTag(d)}${categoryTag(d)}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${priorityTag(d)}${categoryTag(d)}</div>
     </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
     ${showDatePicker ? `<div class="row" style="margin-top:8px; gap:6px;">
       <input type="date" class="def-quickdate" style="margin-top:0;">

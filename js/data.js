@@ -389,7 +389,7 @@ function resolvePlanTask(id){
   if(id.startsWith('d_')){
     const d = state.defs.find(x=>x.id===id.slice(2));
     if(!d) return null;
-    return {id, kind:'def', name:d.description, site:d.location, due:d.dueDate, minutes:d.estimatedMinutes||PLAN_DEFAULT_ESTIMATE, ref:d};
+    return {id, kind:'def', name:d.description, site:d.location, due:d.dueDate, plannedDate:d.plannedDate||null, minutes:d.estimatedMinutes||PLAN_DEFAULT_ESTIMATE, ref:d};
   }
   if(id.startsWith('c_')){
     const gi = state.groupInstances.find(x=>x.id===id.slice(2));
@@ -398,9 +398,52 @@ function resolvePlanTask(id){
     const u = state.units.find(x=>x.id===gi.unitId);
     if(!g || !u) return null;
     const due = gi.dueOverride || groupDueDate(u.id, g);
-    return {id, kind:'check', name:g.name, site:u.name, due, minutes:g.estimatedMinutes||PLAN_DEFAULT_ESTIMATE, ref:gi, unit:u, group:g};
+    return {id, kind:'check', name:g.name, site:u.name, due, plannedDate:gi.plannedDate||null, minutes:g.estimatedMinutes||PLAN_DEFAULT_ESTIMATE, ref:gi, unit:u, group:g};
   }
   return null;
+}
+
+/* Josh's own forward-looking commitment for a deferred task - "I'll actually
+   do this on Thursday" - kept entirely separate from dueDate/dueOverride,
+   which represent the real deadline (trade schedule, safety requirement,
+   etc). Nothing here ever changes automatically; Josh sets/clears it by hand
+   after seeing the agent's suggestion, so a real deadline never silently
+   drifts and a task never gets lost the way an auto-pushed date could. */
+async function setPlannedDate(taskId, date){
+  const info = resolvePlanTask(taskId);
+  if(!info) return;
+  info.ref.plannedDate = date;
+  if(info.kind==='def') await sset('defs', state.defs);
+  else await sset('groupInstances', state.groupInstances);
+}
+async function clearPlannedDate(taskId){
+  await setPlannedDate(taskId, null);
+}
+
+/* Every open task (deficiency or checklist item) Josh has personally
+   scheduled for a future day, grouped for display so the "scheduled out"
+   list he's building over time is actually visible somewhere. Today's items
+   are excluded since they already show in the main plan above. */
+function upcomingPlannedTasks(){
+  const today = todayISO();
+  const items = [];
+  for(const d of state.defs){
+    if(d.status==='Done' || !d.plannedDate || d.plannedDate<=today) continue;
+    if(!isUnitActiveByLocation(d.location)) continue;
+    items.push({id:'d_'+d.id, name:d.description, site:d.location, plannedDate:d.plannedDate});
+  }
+  for(const u of state.units){
+    if(!u.active) continue;
+    for(const gi of state.groupInstances.filter(x=>x.unitId===u.id)){
+      if(!gi.plannedDate || gi.plannedDate<=today) continue;
+      const g = state.checklistGroups.find(x=>x.id===gi.groupId);
+      if(!g) continue;
+      const {done,total} = groupCompletion(gi, g);
+      if(done>=total) continue;
+      items.push({id:'c_'+gi.id, name:g.name, site:u.name, plannedDate:gi.plannedDate});
+    }
+  }
+  return items.sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate));
 }
 
 /* Open tasks not already present in the plan being edited, for the "+ Add
