@@ -158,12 +158,15 @@ function openEditDefModal(defId, onSaved){
       </select></div>
       <div><label>Due Date</label><input id="edDue" type="date" value="${d.dueDate||''}"></div>
     </div>
-    <label>Priority</label>
-    <select id="edPriority">
-      <option value="High" ${d.priority==='High'?'selected':''}>High</option>
-      <option value="Medium" ${(!d.priority||d.priority==='Medium')?'selected':''}>Medium</option>
-      <option value="Low" ${d.priority==='Low'?'selected':''}>Low</option>
-    </select>
+    <div class="field-row">
+      <div><label>Priority</label>
+      <select id="edPriority">
+        <option value="High" ${d.priority==='High'?'selected':''}>High</option>
+        <option value="Medium" ${(!d.priority||d.priority==='Medium')?'selected':''}>Medium</option>
+        <option value="Low" ${d.priority==='Low'?'selected':''}>Low</option>
+      </select></div>
+      <div><label>Est. Time (min)</label><input id="edEstimate" type="number" min="0" step="5" value="${d.estimatedMinutes||''}"></div>
+    </div>
     <div id="edOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="edSave" style="width:100%;">Save Changes</button>
@@ -188,6 +191,8 @@ function openEditDefModal(defId, onSaved){
     d.owner = owner;
     d.dueDate = dueDate;
     d.priority = document.getElementById('edPriority').value;
+    const estVal = document.getElementById('edEstimate').value;
+    d.estimatedMinutes = estVal ? Number(estVal) : null;
     await sset('defs', state.defs);
     closeModal();
     showToast('Deficiency updated.');
@@ -785,12 +790,15 @@ function openDefModal(prefillLocation, onSaved){
       <div><label>Owner</label><select id="dOwner"><option>Trade</option><option>Josh</option><option>Unassigned</option></select></div>
       <div><label>Due Date</label><input id="dDue" type="date"></div>
     </div>
-    <label>Priority</label>
-    <select id="dPriority">
-      <option value="High">High</option>
-      <option value="Medium" selected>Medium</option>
-      <option value="Low">Low</option>
-    </select>
+    <div class="field-row">
+      <div><label>Priority</label>
+      <select id="dPriority">
+        <option value="High">High</option>
+        <option value="Medium" selected>Medium</option>
+        <option value="Low">Low</option>
+      </select></div>
+      <div><label>Est. Time (min)</label><input id="dEstimate" type="number" min="0" step="5"></div>
+    </div>
     <div id="dOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="dSave">Add Deficiency</button>
@@ -811,9 +819,11 @@ function openDefModal(prefillLocation, onSaved){
         return;
       }
     }
+    const estVal = document.getElementById('dEstimate').value;
     state.defs.push({
       id:uid(), location:document.getElementById('dLocation').value.trim(), description:desc,
       owner, dueDate, priority:document.getElementById('dPriority').value,
+      estimatedMinutes: estVal ? Number(estVal) : null,
       status:'DO', pushCount:0, pushReason:'', createdDate:todayISO()
     });
     await sset('defs', state.defs); closeModal();
