@@ -194,7 +194,7 @@ function openEditDefModal(defId, onSaved){
         <option value="Medium" ${(!d.priority||d.priority==='Medium')?'selected':''}>Medium</option>
         <option value="Low" ${d.priority==='Low'?'selected':''}>Low</option>
       </select></div>
-      <div><label>Est. Time</label><select id="edEstimate">${estimateOptionsHtml(d.estimatedMinutes)}</select></div>
+      <div id="edEstimateWrap" style="${d.owner==='Trade'?'display:none;':''}"><label>Est. Time</label><select id="edEstimate">${estimateOptionsHtml(d.estimatedMinutes)}</select></div>
     </div>
     <label>Category</label>
     <select id="edCategory">
@@ -205,6 +205,9 @@ function openEditDefModal(defId, onSaved){
     <div class="divider"></div>
     <button class="btn" id="edSave" style="width:100%;">Save Changes</button>
   `);
+  document.getElementById('edOwner').onchange = (e)=>{
+    document.getElementById('edEstimateWrap').style.display = e.target.value==='Trade' ? 'none' : '';
+  };
   document.getElementById('edSave').onclick = async()=>{
     const desc = document.getElementById('edDesc').value.trim();
     if(!desc){ showToast('Description cannot be empty.'); return; }
@@ -227,7 +230,7 @@ function openEditDefModal(defId, onSaved){
     d.priority = document.getElementById('edPriority').value;
     d.category = document.getElementById('edCategory').value;
     const estVal = document.getElementById('edEstimate').value;
-    d.estimatedMinutes = estVal ? Number(estVal) : null;
+    d.estimatedMinutes = (owner!=='Trade' && estVal) ? Number(estVal) : null;
     await sset('defs', state.defs);
     closeModal();
     showToast('Deficiency updated.');
@@ -733,13 +736,13 @@ function applyDefSearchFilter(){
   const q = (defSearchQuery||'').trim().toLowerCase();
   document.querySelectorAll('#defsListContainer > div').forEach(card=>{
     const matchesSearch = !q || card.textContent.toLowerCase().includes(q);
-    const matchesEstimate = !defMissingEstimateOnly || card.dataset.hasestimate==='0';
+    const matchesEstimate = !defMissingEstimateOnly || (card.dataset.hasestimate==='0' && card.dataset.owner!=='Trade');
     card.style.display = (matchesSearch && matchesEstimate) ? '' : 'none';
   });
 }
 
 function defRowDone(d){
-  return `<div class="card done def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" style="cursor:pointer;">
+  return `<div class="card done def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" data-owner="${escapeHtml(d.owner||'')}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
       <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}${categoryTag(d)}</div>
@@ -749,7 +752,8 @@ function defRowDone(d){
 
 function defRowWithActions(d, showDatePicker){
   const st = dueStatus(d.dueDate, d.status);
-  return `<div class="card ${st} def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" style="cursor:pointer;">
+  const needsEstimate = d.owner!=='Trade';
+  return `<div class="card ${st} def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" data-owner="${escapeHtml(d.owner||'')}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
       <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${priorityTag(d)}${categoryTag(d)}</div>
@@ -759,7 +763,7 @@ function defRowWithActions(d, showDatePicker){
       <button class="btn small def-savedate">Set Date</button>
     </div>` : ''}
     <div class="row" style="margin-top:8px; gap:6px;">
-      <select class="def-quickestimate" style="margin-top:0;">${estimateOptionsHtml(d.estimatedMinutes)}</select>
+      ${needsEstimate ? `<select class="def-quickestimate" style="margin-top:0;">${estimateOptionsHtml(d.estimatedMinutes)}</select>` : ''}
       <button class="btn small done-btn def2-done">Mark Done</button>
     </div>
   </div>`;
@@ -861,7 +865,7 @@ function openDefModal(prefillLocation, onSaved){
         <option value="Medium" selected>Medium</option>
         <option value="Low">Low</option>
       </select></div>
-      <div><label>Est. Time</label><select id="dEstimate">${estimateOptionsHtml()}</select></div>
+      <div id="dEstimateWrap" style="display:none;"><label>Est. Time</label><select id="dEstimate">${estimateOptionsHtml()}</select></div>
     </div>
     <label>Category</label>
     <select id="dCategory">
@@ -872,6 +876,9 @@ function openDefModal(prefillLocation, onSaved){
     <div class="divider"></div>
     <button class="btn" id="dSave">Add Deficiency</button>
   `);
+  document.getElementById('dOwner').onchange = (e)=>{
+    document.getElementById('dEstimateWrap').style.display = e.target.value==='Trade' ? 'none' : '';
+  };
   document.getElementById('dSave').onclick = async()=>{
     const desc = document.getElementById('dDesc').value.trim();
     if(!desc) return;
@@ -893,7 +900,7 @@ function openDefModal(prefillLocation, onSaved){
       id:uid(), location:document.getElementById('dLocation').value.trim(), description:desc,
       owner, dueDate, priority:document.getElementById('dPriority').value,
       category: document.getElementById('dCategory').value,
-      estimatedMinutes: estVal ? Number(estVal) : null,
+      estimatedMinutes: (owner!=='Trade' && estVal) ? Number(estVal) : null,
       status:'DO', pushCount:0, pushReason:'', createdDate:todayISO()
     });
     await sset('defs', state.defs); closeModal();
