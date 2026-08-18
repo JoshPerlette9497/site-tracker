@@ -44,16 +44,7 @@ function renderBrief(){
 
   let html = `<div class="section-title">Daily Brief — ${fmtDate(today)}</div>`;
 
-  html += `<div class="section-title" style="margin-top:14px;">Suggested Plan<span class="pill">${plan.used}/${plan.budget}m</span></div>`;
-  if(plan.selected.length===0){
-    html += `<div class="empty">Nothing of yours due or overdue today.</div>`;
-  } else {
-    html += plan.selected.map(item => item.type==='def'
-      ? cardForDef(item.ref, dueStatus(item.ref.dueDate, item.ref.status))
-      : planPhaseCard(item)
-    ).join('');
-  }
-  if(plan.deferred.length>0) html += `<div class="empty" style="margin-top:0;">+${plan.deferred.length} more waiting — didn't fit today's ${plan.budget}-minute budget.</div>`;
+  html += renderAiPlanSection(plan);
 
   html += `<div class="section-title">Trade — Due Today/Tomorrow<span class="pill">${tradeDueSoon.length}</span></div>`;
   html += tradeDueSoon.length ? tradeDueSoon.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">None due soon.</div>`;
@@ -79,6 +70,157 @@ function renderBrief(){
 
   app.innerHTML = html;
   wireCardActions();
+  wireAiPlanActions();
+}
+
+/* Keeps planDraft (the in-progress edited copy Josh reorders/removes/adds to
+   before saving) in sync with today's AI-generated plan. Rebuilt from
+   todayPlan.final if already saved once today (so edits continue from where
+   they left off), else from todayPlan.suggested. Cleared once the calendar
+   day moves on, since a stale draft from yesterday should never linger. */
+function ensurePlanDraft(){
+  const today = todayISO();
+  if(!state.todayPlan || state.todayPlan.date !== today){ planDraft = null; return; }
+  if(!planDraft || planDraft.date !== today){
+    const base = state.todayPlan.final || state.todayPlan.suggested;
+    planDraft = {
+      date: today,
+      schedule: base.schedule.map(t=>({...t})),
+      deferred: base.deferred.map(t=>({...t}))
+    };
+  }
+}
+
+function planDraftRow(t, idx, total){
+  const info = resolvePlanTask(t.id);
+  if(!info){
+    return `<div class="card" data-planid="${escapeHtml(t.id)}">
+      <div class="item-meta">Task no longer available (deleted or completed) — will drop when you save.</div>
+      <div class="row" style="margin-top:8px;"><button class="btn small danger plan-remove">Remove</button></div>
+    </div>`;
+  }
+  const st = dueStatus(info.due, 'Open');
+  return `<div class="card ${st}" data-planid="${escapeHtml(t.id)}">
+    <div class="row">
+      <div>
+        <div class="item-name">${idx+1}. ${escapeHtml(info.name)}</div>
+        <div class="item-meta">${escapeHtml(info.site||'—')}${info.due?' · due '+fmtDate(info.due):''}${t.start_estimate?' · ~'+escapeHtml(t.start_estimate):''}</div>
+        ${t.reason?`<div class="item-meta" style="font-style:italic;">${escapeHtml(t.reason)}</div>`:''}
+        ${t.warning?`<div class="item-meta" style="color:var(--stamp-red); font-weight:700;">⚠ ${escapeHtml(t.warning)}</div>`:''}
+      </div>
+      <span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
+    </div>
+    <div class="row" style="margin-top:8px; gap:6px;">
+      <button class="btn small ghost plan-up" ${idx===0?'disabled':''}>↑</button>
+      <button class="btn small ghost plan-down" ${idx===total-1?'disabled':''}>↓</button>
+      <button class="btn small danger plan-remove">Remove</button>
+    </div>
+  </div>`;
+}
+
+function planDeferredRow(t){
+  const info = resolvePlanTask(t.id);
+  if(!info) return '';
+  return `<div class="card" data-planid="${escapeHtml(t.id)}">
+    <div class="row">
+      <div>
+        <div class="item-name">${escapeHtml(info.name)}</div>
+        <div class="item-meta">${escapeHtml(info.site||'—')}${info.due?' · due '+fmtDate(info.due):''}</div>
+        ${t.reason?`<div class="item-meta" style="font-style:italic;">${escapeHtml(t.reason)}</div>`:''}
+      </div>
+      <button class="btn small ghost plan-bring-in">Bring into today</button>
+    </div>
+  </div>`;
+}
+
+function renderAiPlanSection(fallbackPlan){
+  ensurePlanDraft();
+  const rate = approveRate30d();
+  let html = `<div class="section-title" style="margin-top:14px;">Suggested Plan${rate!==null?`<span class="pill">${rate}% approved as-is (30d)</span>`:''}</div>`;
+
+  if(!planDraft){
+    html += `<div class="empty" style="margin-bottom:6px;">No AI plan generated yet today — showing automatic fallback ranking.</div>`;
+    if(fallbackPlan.selected.length===0){
+      html += `<div class="empty">Nothing of yours due or overdue today.</div>`;
+    } else {
+      html += fallbackPlan.selected.map(item => item.type==='def'
+        ? cardForDef(item.ref, dueStatus(item.ref.dueDate, item.ref.status))
+        : planPhaseCard(item)
+      ).join('');
+    }
+    if(fallbackPlan.deferred.length>0) html += `<div class="empty" style="margin-top:0;">+${fallbackPlan.deferred.length} more waiting — didn't fit today's ${fallbackPlan.budget}-minute budget.</div>`;
+    return html;
+  }
+
+  const genTime = state.todayPlan.generatedAt ? new Date(state.todayPlan.generatedAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : null;
+  html += `<div class="helptext" style="margin:0 4px 8px;">${genTime?'Generated '+genTime:''}${state.todayPlan.finalizedAt?' · saved':' · review, then save'}</div>`;
+
+  if(planDraft.schedule.length===0){
+    html += `<div class="empty">Nothing scheduled.</div>`;
+  } else {
+    planDraft.schedule.forEach((t,i)=>{ html += planDraftRow(t, i, planDraft.schedule.length); });
+  }
+  html += `<button class="btn small ghost" id="planAddTaskBtn" style="margin:6px 4px;">+ Add Task</button>`;
+
+  if(planDraft.deferred.length>0){
+    html += `<div class="section-title" style="margin-top:10px;">Didn't Fit Today<span class="pill">${planDraft.deferred.length}</span></div>`;
+    html += planDraft.deferred.map(t=>planDeferredRow(t)).join('');
+  }
+
+  html += `<button class="btn" id="planSaveBtn" style="width:100%; margin-top:10px;">${state.todayPlan.final?'Update Plan':'Approve Plan'}</button>`;
+  return html;
+}
+
+function wireAiPlanActions(){
+  if(!planDraft) return;
+  document.querySelectorAll('.plan-up').forEach(b=>b.onclick=(e)=>{
+    const id = e.target.closest('[data-planid]').dataset.planid;
+    const i = planDraft.schedule.findIndex(t=>t.id===id);
+    if(i>0){ [planDraft.schedule[i-1], planDraft.schedule[i]] = [planDraft.schedule[i], planDraft.schedule[i-1]]; render(); }
+  });
+  document.querySelectorAll('.plan-down').forEach(b=>b.onclick=(e)=>{
+    const id = e.target.closest('[data-planid]').dataset.planid;
+    const i = planDraft.schedule.findIndex(t=>t.id===id);
+    if(i>=0 && i<planDraft.schedule.length-1){ [planDraft.schedule[i+1], planDraft.schedule[i]] = [planDraft.schedule[i], planDraft.schedule[i+1]]; render(); }
+  });
+  document.querySelectorAll('.plan-remove').forEach(b=>b.onclick=(e)=>{
+    const id = e.target.closest('[data-planid]').dataset.planid;
+    planDraft.schedule = planDraft.schedule.filter(t=>t.id!==id);
+    render();
+  });
+  document.querySelectorAll('.plan-bring-in').forEach(b=>b.onclick=(e)=>{
+    const id = e.target.closest('[data-planid]').dataset.planid;
+    const t = planDraft.deferred.find(x=>x.id===id);
+    if(t){
+      planDraft.deferred = planDraft.deferred.filter(x=>x.id!==id);
+      planDraft.schedule.push(t);
+      render();
+    }
+  });
+  const addBtn = document.getElementById('planAddTaskBtn');
+  if(addBtn) addBtn.onclick = openAddPlanTaskModal;
+  const saveBtn = document.getElementById('planSaveBtn');
+  if(saveBtn) saveBtn.onclick = async()=>{
+    await finalizePlan(planDraft.schedule, planDraft.deferred);
+    showToast('Plan saved.');
+    render();
+  };
+}
+
+function openAddPlanTaskModal(){
+  const excludeIds = [...planDraft.schedule.map(t=>t.id), ...planDraft.deferred.map(t=>t.id)];
+  const candidates = openPlanCandidates(excludeIds);
+  const rows = candidates.map(c=>`<div class="card plan-candidate" data-candid="${escapeHtml(c.id)}" style="cursor:pointer;">
+    <div class="item-name">${escapeHtml(c.name)}</div>
+    <div class="item-meta">${escapeHtml(c.site||'—')}${c.due?' · due '+fmtDate(c.due):' · no due date'}</div>
+  </div>`).join('') || `<div class="empty">Nothing else open right now.</div>`;
+  showModal(`<h2>Add Task to Plan</h2>${rows}`);
+  document.querySelectorAll('.plan-candidate').forEach(el=>el.onclick=()=>{
+    const id = el.dataset.candid;
+    planDraft.schedule.push({id, reason:'Added manually', warning:null, start_estimate:null});
+    closeModal();
+    render();
+  });
 }
 
 function renderToday(){
