@@ -25,11 +25,7 @@ function renderBrief(){
   const tomorrow = addDays(today, 1);
 
   const openDefs = state.defs.filter(d=>d.status!=='Done');
-  const MINE_CAP = 2;
-  const mineAll = openDefs.filter(d=>d.owner==='Josh' && d.dueDate && d.dueDate<=today)
-    .sort((a,b)=> (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1) || (a.dueDate||'').localeCompare(b.dueDate||''));
-  const mine = mineAll.slice(0, MINE_CAP);
-  const mineHiddenCount = mineAll.length - mine.length;
+  const plan = buildSuggestedPlan();
   const tradeDueSoon = openDefs.filter(d=>d.owner==='Trade' && d.dueDate && d.dueDate<=tomorrow);
   const tradeOpenNoDue = openDefs.filter(d=>d.owner==='Trade' && !d.dueDate);
   const backlogCount = openDefs.filter(d=>(d.pushCount||0)>=1).length;
@@ -48,9 +44,16 @@ function renderBrief(){
 
   let html = `<div class="section-title">Daily Brief — ${fmtDate(today)}</div>`;
 
-  html += `<div class="section-title" style="margin-top:14px;">Mine to Drive<span class="pill">${mine.length}</span></div>`;
-  html += mine.length ? mine.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">Nothing of yours due or overdue.</div>`;
-  if(mineHiddenCount>0) html += `<div class="empty" style="margin-top:0;">+${mineHiddenCount} more of yours waiting — see Deficiencies tab to reprioritize or spread out.</div>`;
+  html += `<div class="section-title" style="margin-top:14px;">Suggested Plan<span class="pill">${plan.used}/${plan.budget}m</span></div>`;
+  if(plan.selected.length===0){
+    html += `<div class="empty">Nothing of yours due or overdue today.</div>`;
+  } else {
+    html += plan.selected.map(item => item.type==='def'
+      ? cardForDef(item.ref, dueStatus(item.ref.dueDate, item.ref.status))
+      : planPhaseCard(item)
+    ).join('');
+  }
+  if(plan.deferred.length>0) html += `<div class="empty" style="margin-top:0;">+${plan.deferred.length} more waiting — didn't fit today's ${plan.budget}-minute budget.</div>`;
 
   html += `<div class="section-title">Trade — Due Today/Tomorrow<span class="pill">${tradeDueSoon.length}</span></div>`;
   html += tradeDueSoon.length ? tradeDueSoon.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">None due soon.</div>`;
@@ -122,6 +125,19 @@ function cardForInstance(inst, m, u, due, st){
   </div>`;
 }
 
+function planPhaseCard(item){
+  const st = dueStatus(item.due, 'Open');
+  return `<div class="card ${st} plan-phase-card" data-unitid="${item.unit.id}" style="cursor:pointer;">
+    <div class="row">
+      <div>
+        <div class="item-name">${escapeHtml(item.group.name)}</div>
+        <div class="item-meta">${escapeHtml(item.unit.name)} · Phase Check · due ${fmtDate(item.due)} · ${item.minutes}m</div>
+      </div>
+      <span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
+    </div>
+  </div>`;
+}
+
 function priorityTag(d){
   if(d.priority==='High') return ` · <b style="color:var(--stamp-red);">HIGH</b>`;
   if(d.priority==='Low') return ` · <span style="opacity:0.6;">low</span>`;
@@ -133,7 +149,7 @@ function cardForDef(d, st){
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(d.description)}</div>
-        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${priorityTag(d)}</div>
+        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${priorityTag(d)}</div>
       </div>
       <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>
@@ -235,6 +251,9 @@ function wireCardActions(){
   document.querySelectorAll('.def-card').forEach(card=>card.onclick=(e)=>{
     if(e.target.closest('button')) return;
     openEditDefModal(card.dataset.def, render);
+  });
+  document.querySelectorAll('.plan-phase-card').forEach(card=>card.onclick=()=>{
+    openUnitDetail(card.dataset.unitid);
   });
 }
 

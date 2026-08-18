@@ -288,6 +288,59 @@ function groupStatus(due, done, total){
   return 'open';
 }
 
+const PLAN_DEFAULT_ESTIMATE = 30;
+
+/* Builds today's suggested plan: Josh-owned deficiencies + phase-check groups
+   due today or overdue, sorted by due date then priority, greedily filled into
+   the daily time budget. Trade-owned deficiencies never count against the
+   budget — they're rounds follow-ups, not Josh's own task time. */
+function buildSuggestedPlan(){
+  const today = todayISO();
+  const budget = state.dailyAllowanceMinutes || 180;
+
+  const defCandidates = state.defs
+    .filter(d=>d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=today)
+    .map(d=>({
+      type:'def', due:d.dueDate, priority:d.priority||'Medium',
+      minutes: d.estimatedMinutes || PLAN_DEFAULT_ESTIMATE,
+      ref:d
+    }));
+
+  const phaseCandidates = [];
+  for(const u of state.units){
+    if(!u.active) continue;
+    for(const gi of state.groupInstances.filter(x=>x.unitId===u.id)){
+      const g = state.checklistGroups.find(x=>x.id===gi.groupId);
+      if(!g) continue;
+      const due = gi.dueOverride || groupDueDate(u.id, g);
+      if(!due || due>today) continue;
+      const {done,total} = groupCompletion(gi, g);
+      if(done>=total) continue;
+      phaseCandidates.push({
+        type:'phase', due, priority:'Medium',
+        minutes: g.estimatedMinutes || PLAN_DEFAULT_ESTIMATE,
+        unit:u, group:g, groupInstance:gi
+      });
+    }
+  }
+
+  const all = [...defCandidates, ...phaseCandidates].sort((a,b)=>
+    (a.due||'').localeCompare(b.due||'') || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
+  );
+
+  const selected = [], deferred = [];
+  let used = 0;
+  for(const item of all){
+    if(selected.length===0 || used+item.minutes<=budget){
+      selected.push(item);
+      used += item.minutes;
+    } else {
+      deferred.push(item);
+    }
+  }
+  return {selected, deferred, used, budget};
+}
+
 function makeInstance(unitId, masterId){
   return {id:uid(), unitId, masterId, status:'Open', pushCount:0, pushReason:'', completedDate:null, dueOverride:null, createdDate:todayISO()};
 }
