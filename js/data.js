@@ -349,7 +349,12 @@ function buildSuggestedPlan(){
       deferred.push(item);
     }
   }
-  return {selected, deferred, used, budget};
+
+  // Trade-owned deficiencies due today: never budgeted or ranked against Josh's
+  // own time, but still worth surfacing so today's rounds/follow-ups are visible.
+  const tradeToday = state.defs.filter(d=>d.status!=='Done' && d.owner==='Trade' && d.dueDate===today);
+
+  return {selected, deferred, tradeToday, used, budget};
 }
 
 function makeInstance(unitId, masterId){
