@@ -143,6 +143,14 @@ function cardForDef(d, st){
   </div>`;
 }
 
+const ESTIMATE_MINUTE_OPTIONS = [5, 10, 30, 60, 120];
+function estimateOptionsHtml(selected){
+  const sel = selected ? Number(selected) : null;
+  return `<option value="">—</option>` + ESTIMATE_MINUTE_OPTIONS.map(m=>
+    `<option value="${m}" ${sel===m?'selected':''}>${m} min</option>`
+  ).join('');
+}
+
 function openEditDefModal(defId, onSaved){
   const d = state.defs.find(x=>x.id===defId);
   if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
@@ -165,7 +173,7 @@ function openEditDefModal(defId, onSaved){
         <option value="Medium" ${(!d.priority||d.priority==='Medium')?'selected':''}>Medium</option>
         <option value="Low" ${d.priority==='Low'?'selected':''}>Low</option>
       </select></div>
-      <div><label>Est. Time (min)</label><input id="edEstimate" type="number" min="0" step="5" value="${d.estimatedMinutes||''}"></div>
+      <div><label>Est. Time</label><select id="edEstimate">${estimateOptionsHtml(d.estimatedMinutes)}</select></div>
     </div>
     <div id="edOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
@@ -797,7 +805,7 @@ function openDefModal(prefillLocation, onSaved){
         <option value="Medium" selected>Medium</option>
         <option value="Low">Low</option>
       </select></div>
-      <div><label>Est. Time (min)</label><input id="dEstimate" type="number" min="0" step="5"></div>
+      <div><label>Est. Time</label><select id="dEstimate">${estimateOptionsHtml()}</select></div>
     </div>
     <div id="dOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
