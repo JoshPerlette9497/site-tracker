@@ -411,16 +411,17 @@ function openUnitModal(){
   };
 }
 
-function renderPhaseGroupRow(row){
+function renderPhaseGroupRow(row, highlight){
   const {gi,g,due,done,total,st} = row;
   const isOpen = expandedGroupIds.has(gi.id);
-  let html = `<div class="card ${st}">
+  let html = `<div class="card ${st}${highlight?' week-urgent':''}">
     <div class="row pcg-toggle" data-giid="${gi.id}" style="cursor:pointer;">
       <div>
         <div class="item-name">${escapeHtml(g.name)}</div>
         <div class="item-meta">${due?'due '+fmtDate(due):'no schedule match'} · ${done}/${total} done</div>
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
+        ${highlight?'<span class="stamp week-urgent">This Week</span>':''}
         <span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':st==='done'?'Done':'Open'}</span>
         <span style="font-size:16px;">${isOpen?'▾':'▸'}</span>
       </div>
@@ -519,19 +520,24 @@ function openUnitDetail(unitId){
     return {gi, g, due, done, total, st};
   }).filter(Boolean).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
 
-  const phaseCutoff = addDays(todayISO(), 14);
-  const dueSoonRows = groupRows.filter(r=>r.due && r.due<=phaseCutoff);
-  const laterRows = groupRows.filter(r=>!(r.due && r.due<=phaseCutoff));
+  // Highlight the 1-2 phases due this week (Mon-Sun) so they stand out;
+  // everything else — past or future — sits in the collapsed dropdown below.
+  const {weekStart, weekEnd} = currentWeekRange();
+  const weekRows = groupRows.filter(r=>r.due && r.due>=weekStart && r.due<=weekEnd && r.st!=='done');
+  const highlightRows = weekRows.slice(0, 2);
+  const highlightIds = new Set(highlightRows.map(r=>r.gi.id));
+  const restRows = groupRows.filter(r=>!highlightIds.has(r.gi.id));
 
-  for(const row of dueSoonRows){ html += renderPhaseGroupRow(row); }
-  if(dueSoonRows.length===0 && laterRows.length===0) html += `<div class="empty">No phase checklist groups yet.</div>`;
-  if(laterRows.length){
+  for(const row of highlightRows){ html += renderPhaseGroupRow(row, true); }
+  if(groupRows.length===0){
+    html += `<div class="empty">No phase checklist groups yet.</div>`;
+  } else if(restRows.length){
     const overflowOpen = expandedPhaseOverflow.has(unitId);
     html += `<div class="card phase-overflow-toggle" data-unitid="${unitId}" style="cursor:pointer;">
-      <div class="row"><div class="item-name" style="font-size:14px;">${overflowOpen?'▾':'▸'} ${laterRows.length} more (due later than 14 days, or no schedule match)</div></div>
+      <div class="row"><div class="item-name" style="font-size:14px;">${overflowOpen?'▾':'▸'} ${restRows.length} more phase check${restRows.length===1?'':'s'}</div></div>
     </div>`;
     if(overflowOpen){
-      for(const row of laterRows){ html += renderPhaseGroupRow(row); }
+      for(const row of restRows){ html += renderPhaseGroupRow(row); }
     }
   }
 

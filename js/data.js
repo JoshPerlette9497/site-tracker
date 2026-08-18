@@ -24,6 +24,17 @@ function businessDaysBetween(fromISO, toISO){
   return count;
 }
 
+/* Mon-Sun range containing today, using the same local-date logic as the
+   rest of the app (todayISO/addDays — no timezone conversion beyond that). */
+function currentWeekRange(){
+  const today = todayISO();
+  const dow = new Date(today+'T00:00:00').getDay(); // 0=Sun..6=Sat
+  const mondayOffset = dow===0 ? -6 : 1-dow;
+  const weekStart = addDays(today, mondayOffset);
+  const weekEnd = addDays(weekStart, 6);
+  return {weekStart, weekEnd};
+}
+
 function computeRisk(u){
   if(u.riskOverride) return u.riskOverride;
   if(!u.lastWalkDate) return '🔴';

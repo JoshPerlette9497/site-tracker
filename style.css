@@ -42,6 +42,7 @@
   }
   .card.overdue{border-color:var(--stamp-red); background:#FBEEE8;}
   .card.today{border-color:var(--stamp-amber); background:#FCF3E3;}
+  .card.week-urgent{border-color:var(--stamp-red); border-width:2px; background:#FBEEE8;}
   .row{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
   .item-name{font-weight:600; font-size:15px; color:var(--ink);}
   .item-meta{color:var(--ink-dim); font-size:12px; margin-top:3px;}
@@ -51,6 +52,7 @@
     transform:rotate(-2deg); flex-shrink:0;
   }
   .stamp.overdue{color:var(--stamp-red);}
+  .stamp.week-urgent{background:var(--stamp-red); color:#fff; border-color:var(--stamp-red);}
   .stamp.today{color:var(--stamp-amber);}
   .stamp.done{color:var(--stamp-green);}
   .stamp.open{color:var(--ink-dim); border-style:dashed;}
