@@ -88,7 +88,7 @@ const DEFAULT_MASTER = [
 ];
 
 /* ---------- state ---------- */
-let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], todayPlan:null, planFeedback:[] };
+let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[] };
 let activeTab = 'today';
 let selectedScheduleUnit = null;
 let selectedLogDate = null;
@@ -102,7 +102,6 @@ let defMissingEstimateOnly = false;
 let defOwnerFilter = 'all';
 let unitSearchQuery = '';
 let inactiveUnitsExpanded = false;
-let planDraft = null; // working copy of today's AI plan while Josh reviews/edits it before saving
 
 const LOG_HISTORY_SEED = [
 {date:'2026-08-04', content:"**AB03:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Josh corrected three undersized door openings in unit 2234 and 2236 basements same-day. CSM Flooring scheduled Fri 8/7 to level unit 2234 basement floor.\n**AB04:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Basement development for unit 2240 underway: IPD completed today, plumbers rough-in/finish tomorrow, HVAC rough-in 8/6, floor leveling 8/7, electrical rough-in 8/10, full inspection 8/11.\n**AB16:** Painters on site, finishing 8/6. CSM Flooring up next, 8/7–8/14.\n**AB17:** Plumbing final on site, finishing 8/6; HVAC final up next. Added deficiencies to verify shelves/mirrors installed and install Slokker Homes powder room mirror.\n**JB01:** Still waiting on permit to begin construction; following up with office/Scott on 8/7.\n**JB12:** No activity change. Following up with C+J Co on NC rate for slab pour.\n**JB20:** No activity change.\n**Site-wide:** Curb stop walk completed — deficiencies logged for AB02/06/07/08/11/12 and AB13–18. Punch list added: bollard light bases, bollard lights install, city sidewalk/81st St/AB18 path."},
@@ -125,8 +124,6 @@ async function loadAll(){
   state.instances = await sget('instances', null);
   state.defs = await sget('defs', []);
   state.schedule = await sget('schedule', []);
-  state.todayPlan = await sget('todayPlan', null);
-  state.planFeedback = await sget('planFeedback', []);
   state.lastBackup = await sget('lastBackup', null);
   state.logHistory = await sget('logHistory', null);
   state.roundHistory = await sget('roundHistory', []);
@@ -373,44 +370,26 @@ function buildSuggestedPlan(){
   return {selected, deferred, tradeToday, used, budget};
 }
 
-/* ---------- AI-generated daily plan (todayPlan / planFeedback) ----------
-   The actual Claude API call runs OUTSIDE this app (a standalone scheduled
-   script, since this is a static public site with no backend to safely hold
-   an API key). That script writes {date, generatedAt, suggested, final}
-   into the todayPlan key. Task ids in that plan are prefixed d_/c_ so this
-   app can resolve them back to live records without trusting anything the
-   agent echoed back about the task itself (name, due date, etc. always come
-   fresh from state, not from the plan). */
-
-/* Resolves a plan task id back to its current live record. Returns null if
-   the underlying deficiency/checklist item no longer exists (deleted, or the
-   unit was removed) so the UI can drop it gracefully instead of erroring. */
-function resolvePlanTask(id){
+/* ---------- Josh's own forward-looking task schedule (plannedDate) ----------
+   A personal commitment - "I'll actually do this Thursday" - separate from
+   dueDate/dueOverride (the real deadline). Nothing here is ever set
+   automatically; Josh sets/clears it by hand from a deferred item in the
+   Suggested Plan, so a real deadline can't drift and a deferred task can't
+   quietly get lost. Ids are prefixed d_/c_ so a single string can resolve to
+   either a deficiency or a checklist item. */
+function resolveScheduleTask(id){
   if(id.startsWith('d_')){
     const d = state.defs.find(x=>x.id===id.slice(2));
-    if(!d) return null;
-    return {id, kind:'def', name:d.description, site:d.location, due:d.dueDate, plannedDate:d.plannedDate||null, minutes:d.estimatedMinutes||PLAN_DEFAULT_ESTIMATE, ref:d};
+    return d ? {kind:'def', ref:d} : null;
   }
   if(id.startsWith('c_')){
     const gi = state.groupInstances.find(x=>x.id===id.slice(2));
-    if(!gi) return null;
-    const g = state.checklistGroups.find(x=>x.id===gi.groupId);
-    const u = state.units.find(x=>x.id===gi.unitId);
-    if(!g || !u) return null;
-    const due = gi.dueOverride || groupDueDate(u.id, g);
-    return {id, kind:'check', name:g.name, site:u.name, due, plannedDate:gi.plannedDate||null, minutes:g.estimatedMinutes||PLAN_DEFAULT_ESTIMATE, ref:gi, unit:u, group:g};
+    return gi ? {kind:'check', ref:gi} : null;
   }
   return null;
 }
-
-/* Josh's own forward-looking commitment for a deferred task - "I'll actually
-   do this on Thursday" - kept entirely separate from dueDate/dueOverride,
-   which represent the real deadline (trade schedule, safety requirement,
-   etc). Nothing here ever changes automatically; Josh sets/clears it by hand
-   after seeing the agent's suggestion, so a real deadline never silently
-   drifts and a task never gets lost the way an auto-pushed date could. */
 async function setPlannedDate(taskId, date){
-  const info = resolvePlanTask(taskId);
+  const info = resolveScheduleTask(taskId);
   if(!info) return;
   info.ref.plannedDate = date;
   if(info.kind==='def') await sset('defs', state.defs);
@@ -444,93 +423,6 @@ function upcomingPlannedTasks(){
     }
   }
   return items.sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate));
-}
-
-/* Open tasks not already present in the plan being edited, for the "+ Add
-   Task" picker. Mirrors buildSuggestedPlan's candidate logic (active units,
-   not-Done defs, not-fully-done checklist groups) minus the owner/budget
-   filtering, since here Josh is choosing by hand. */
-function openPlanCandidates(excludeIds){
-  const excl = new Set(excludeIds);
-  const defTasks = state.defs
-    .filter(d=>d.status!=='Done' && isUnitActiveByLocation(d.location) && !excl.has('d_'+d.id))
-    .map(d=>({id:'d_'+d.id, name:d.description, site:d.location, due:d.dueDate}));
-
-  const checkTasks = [];
-  for(const u of state.units){
-    if(!u.active) continue;
-    for(const gi of state.groupInstances.filter(x=>x.unitId===u.id)){
-      if(excl.has('c_'+gi.id)) continue;
-      const g = state.checklistGroups.find(x=>x.id===gi.groupId);
-      if(!g) continue;
-      const {done,total} = groupCompletion(gi, g);
-      if(done>=total) continue;
-      const due = gi.dueOverride || groupDueDate(u.id, g);
-      checkTasks.push({id:'c_'+gi.id, name:g.name, site:u.name, due});
-    }
-  }
-  return [...defTasks, ...checkTasks].sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
-}
-
-/* Finalizes (or re-finalizes) today's plan: saves the edited schedule/deferred
-   as todayPlan.final, and logs one plan_feedback row per scheduled task per
-   the agreed shape (suggested vs. final position, side by side). Re-saving
-   the same day replaces that day's feedback rows instead of piling up
-   duplicates, since Josh can revise a plan more than once before it's done. */
-async function finalizePlan(finalSchedule, finalDeferred){
-  const today = todayISO();
-  const suggested = (state.todayPlan && state.todayPlan.suggested) || {schedule:[], deferred:[]};
-  const suggestedPos = {};
-  suggested.schedule.forEach((t,i)=>{ suggestedPos[t.id] = i+1; });
-  const deferredIds = new Set(suggested.deferred.map(t=>t.id));
-  const finalScheduleIds = new Set(finalSchedule.map(t=>t.id));
-  const now = new Date().toISOString();
-
-  const rows = [];
-  finalSchedule.forEach((t,i)=>{
-    const pos = i+1;
-    const wasSuggested = suggestedPos[t.id] != null;
-    const wasDeferred = deferredIds.has(t.id);
-    let action;
-    if(wasDeferred) action = 'deferred_override';
-    else if(!wasSuggested) action = 'added_manually';
-    else if(suggestedPos[t.id] === pos) action = 'approved_unchanged';
-    else action = 'reordered';
-    rows.push({
-      id: uid(), date: today, taskId: t.id,
-      suggestedPosition: suggestedPos[t.id] ?? null,
-      suggestedStartEstimate: t.start_estimate ?? null,
-      action, finalPosition: pos, finalStartEstimate: t.start_estimate ?? null,
-      notes: '', timestamp: now
-    });
-  });
-  suggested.schedule.forEach(t=>{
-    if(!finalScheduleIds.has(t.id)){
-      rows.push({
-        id: uid(), date: today, taskId: t.id,
-        suggestedPosition: suggestedPos[t.id] ?? null, suggestedStartEstimate: t.start_estimate ?? null,
-        action: 'removed', finalPosition: null, finalStartEstimate: null,
-        notes: '', timestamp: now
-      });
-    }
-  });
-
-  state.planFeedback = state.planFeedback.filter(r=>r.date!==today).concat(rows);
-  state.todayPlan = {...state.todayPlan, date: today, final: {schedule: finalSchedule, deferred: finalDeferred}, finalizedAt: now};
-  await sset('planFeedback', state.planFeedback);
-  await sset('todayPlan', state.todayPlan);
-}
-
-/* % of feedback rows (last 30 days) where Josh approved the AI's suggested
-   position unchanged - the single number that says whether the agent is
-   getting more or less useful over time. Excludes manually-added tasks
-   (no suggestedPosition) since the agent never ranked those to begin with. */
-function approveRate30d(){
-  const since = addDays(todayISO(), -30);
-  const rows = state.planFeedback.filter(r=>r.date>=since && r.suggestedPosition!=null);
-  if(rows.length===0) return null;
-  const approved = rows.filter(r=>r.action==='approved_unchanged').length;
-  return Math.round((approved/rows.length)*100);
 }
 
 function makeInstance(unitId, masterId){
