@@ -144,12 +144,17 @@ function priorityTag(d){
   return '';
 }
 
+function categoryTag(d){
+  if(d.category==='Safety') return ` · <b style="color:var(--stamp-red);">⚠ SAFETY</b>`;
+  return '';
+}
+
 function cardForDef(d, st){
   return `<div class="card ${st} def-card" data-def="${d.id}" style="cursor:pointer;">
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(d.description)}</div>
-        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${priorityTag(d)}</div>
+        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${priorityTag(d)}${categoryTag(d)}</div>
       </div>
       <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>
@@ -191,6 +196,11 @@ function openEditDefModal(defId, onSaved){
       </select></div>
       <div><label>Est. Time</label><select id="edEstimate">${estimateOptionsHtml(d.estimatedMinutes)}</select></div>
     </div>
+    <label>Category</label>
+    <select id="edCategory">
+      <option value="Construction" ${(!d.category||d.category==='Construction')?'selected':''}>Construction</option>
+      <option value="Safety" ${d.category==='Safety'?'selected':''}>Safety</option>
+    </select>
     <div id="edOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="edSave" style="width:100%;">Save Changes</button>
@@ -215,6 +225,7 @@ function openEditDefModal(defId, onSaved){
     d.owner = owner;
     d.dueDate = dueDate;
     d.priority = document.getElementById('edPriority').value;
+    d.category = document.getElementById('edCategory').value;
     const estVal = document.getElementById('edEstimate').value;
     d.estimatedMinutes = estVal ? Number(estVal) : null;
     await sset('defs', state.defs);
@@ -433,7 +444,7 @@ function openUnitDetail(unitId){
         const st = dueStatus(d.dueDate, d.status);
         html += `<div class="card ${st} uddef-card" data-uddef="${d.id}" style="cursor:pointer;"><div class="row"><div>
           <div class="item-name">${escapeHtml(d.description)}</div>
-          <div class="item-meta">${escapeHtml(d.owner||'Unassigned')} · ${d.status}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${priorityTag(d)}</div>
+          <div class="item-meta">${escapeHtml(d.owner||'Unassigned')} · ${d.status}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${priorityTag(d)}${categoryTag(d)}</div>
           </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
           <div class="row" style="margin-top:8px; gap:6px;">
             <button class="btn small done-btn ud-def-done">Mark Done</button>
@@ -722,7 +733,7 @@ function defRowDone(d){
   return `<div class="card done def2-card" data-def2="${d.id}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}${categoryTag(d)}</div>
     </div><span class="stamp done">Done</span></div>
   </div>`;
 }
@@ -732,7 +743,7 @@ function defRowWithActions(d, showDatePicker){
   return `<div class="card ${st} def2-card" data-def2="${d.id}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${priorityTag(d)}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${priorityTag(d)}${categoryTag(d)}</div>
     </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
     ${showDatePicker ? `<div class="row" style="margin-top:8px; gap:6px;">
       <input type="date" class="def-quickdate" style="margin-top:0;">
@@ -826,6 +837,11 @@ function openDefModal(prefillLocation, onSaved){
       </select></div>
       <div><label>Est. Time</label><select id="dEstimate">${estimateOptionsHtml()}</select></div>
     </div>
+    <label>Category</label>
+    <select id="dCategory">
+      <option value="Construction" selected>Construction</option>
+      <option value="Safety">Safety</option>
+    </select>
     <div id="dOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="dSave">Add Deficiency</button>
@@ -850,6 +866,7 @@ function openDefModal(prefillLocation, onSaved){
     state.defs.push({
       id:uid(), location:document.getElementById('dLocation').value.trim(), description:desc,
       owner, dueDate, priority:document.getElementById('dPriority').value,
+      category: document.getElementById('dCategory').value,
       estimatedMinutes: estVal ? Number(estVal) : null,
       status:'DO', pushCount:0, pushReason:'', createdDate:todayISO()
     });
@@ -867,7 +884,9 @@ function mdToHtml(text){
 function buildBriefSummary(date){
   const openDefs = state.defs.filter(d=>d.status!=='Done');
   const mineAll = openDefs.filter(d=>d.owner==='Josh' && d.dueDate && d.dueDate<=date)
-    .sort((a,b)=> (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1) || (a.dueDate||'').localeCompare(b.dueDate||''));
+    .sort((a,b)=> (a.dueDate||'').localeCompare(b.dueDate||'')
+      || (CATEGORY_ORDER[a.category||'Construction']??1)-(CATEGORY_ORDER[b.category||'Construction']??1)
+      || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1));
   const mine = mineAll.slice(0,2);
   const tradeDueSoon = openDefs.filter(d=>d.owner==='Trade' && d.dueDate && d.dueDate<=addDays(date,1));
   let html = `<b>Planned (Brief):</b><br>`;

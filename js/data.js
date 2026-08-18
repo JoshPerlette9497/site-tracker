@@ -132,6 +132,7 @@ async function loadAll(){
   await migrateRoundsFields();
   await migrateDefIds();
   await migrateDefPriority();
+  await migrateDefCategory();
   await migrateChecklistMatchPhases();
   if(state.instances === null){
     state.instances = [];
@@ -205,6 +206,14 @@ async function migrateDefPriority(){
   let changed = false;
   for(const d of state.defs){
     if(!d.priority){ d.priority = 'Medium'; changed = true; }
+  }
+  if(changed) await sset('defs', state.defs);
+}
+const CATEGORY_ORDER = {Safety:0, Construction:1};
+async function migrateDefCategory(){
+  let changed = false;
+  for(const d of state.defs){
+    if(!d.category){ d.category = 'Construction'; changed = true; }
   }
   if(changed) await sset('defs', state.defs);
 }
@@ -301,7 +310,7 @@ function buildSuggestedPlan(){
   const defCandidates = state.defs
     .filter(d=>d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=today)
     .map(d=>({
-      type:'def', due:d.dueDate, priority:d.priority||'Medium',
+      type:'def', due:d.dueDate, priority:d.priority||'Medium', category:d.category||'Construction',
       minutes: d.estimatedMinutes || PLAN_DEFAULT_ESTIMATE,
       ref:d
     }));
@@ -317,7 +326,7 @@ function buildSuggestedPlan(){
       const {done,total} = groupCompletion(gi, g);
       if(done>=total) continue;
       phaseCandidates.push({
-        type:'phase', due, priority:'Medium',
+        type:'phase', due, priority:'Medium', category:'Construction',
         minutes: g.estimatedMinutes || PLAN_DEFAULT_ESTIMATE,
         unit:u, group:g, groupInstance:gi
       });
@@ -325,7 +334,9 @@ function buildSuggestedPlan(){
   }
 
   const all = [...defCandidates, ...phaseCandidates].sort((a,b)=>
-    (a.due||'').localeCompare(b.due||'') || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
+    (a.due||'').localeCompare(b.due||'')
+    || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
+    || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
   );
 
   const selected = [], deferred = [];
