@@ -172,6 +172,38 @@ function estimateOptionsHtml(selected){
   ).join('');
 }
 
+/* Marks a deficiency done. Josh-owned items get asked how long it actually
+   took first (builds real actual-vs-estimate history); Trade-owned items
+   don't need that since Trade time was never budgeted in the first place. */
+function markDefDoneWithTimeCheck(id, onComplete){
+  const d = state.defs.find(x=>x.id===id);
+  if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
+  if(d.owner!=='Josh'){
+    (async()=>{
+      d.status='Done'; d.completedDate=todayISO();
+      await sset('defs', state.defs);
+      onComplete();
+    })();
+    return;
+  }
+  showModal(`
+    <h2>Time Spent</h2>
+    <div class="helptext" style="margin-bottom:8px;">How long did this actually take?</div>
+    <div class="item-name" style="margin-bottom:10px;">${escapeHtml(d.description)}</div>
+    <select id="actualTimeSelect">${estimateOptionsHtml(d.estimatedMinutes)}</select>
+    <div class="divider"></div>
+    <button class="btn" id="actualTimeSave" style="width:100%;">Mark Done</button>
+  `);
+  document.getElementById('actualTimeSave').onclick = async()=>{
+    const val = document.getElementById('actualTimeSelect').value;
+    d.actualMinutes = val ? Number(val) : null;
+    d.status='Done'; d.completedDate=todayISO();
+    await sset('defs', state.defs);
+    closeModal();
+    onComplete();
+  };
+}
+
 function openEditDefModal(defId, onSaved){
   const d = state.defs.find(x=>x.id===defId);
   if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
@@ -254,13 +286,10 @@ function wireCardActions(){
       await sset('instances', state.instances); render();
     });
   });
-  document.querySelectorAll('.defact-done').forEach(b=>b.onclick=async(e)=>{
+  document.querySelectorAll('.defact-done').forEach(b=>b.onclick=(e)=>{
     e.stopPropagation();
     const id = e.target.closest('[data-def]').dataset.def;
-    const d = state.defs.find(x=>x.id===id);
-    if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
-    d.status='Done'; d.completedDate=todayISO();
-    await sset('defs', state.defs); render();
+    markDefDoneWithTimeCheck(id, render);
   });
   document.querySelectorAll('.def-card').forEach(card=>card.onclick=(e)=>{
     if(e.target.closest('button')) return;
@@ -527,15 +556,13 @@ function openUnitDetail(unitId){
     closeModal();
     openDefModal(u.name, ()=>openUnitDetail(unitId));
   };
-  document.querySelectorAll('.ud-def-done').forEach(b=>b.onclick=async(e)=>{
+  document.querySelectorAll('.ud-def-done').forEach(b=>b.onclick=(e)=>{
     e.stopPropagation();
     const id = e.target.closest('[data-uddef]').dataset.uddef;
-    const d2 = state.defs.find(d=>d.id===id);
-    if(!d2){ showToast('Could not find that deficiency — try reloading.'); return; }
-    d2.status='Done'; d2.completedDate=todayISO();
-    await sset('defs', state.defs);
-    showToast('Marked done.');
-    openUnitDetail(unitId);
+    markDefDoneWithTimeCheck(id, ()=>{
+      showToast('Marked done.');
+      openUnitDetail(unitId);
+    });
   });
   document.querySelectorAll('.ud-def-remove').forEach(b=>b.onclick=(e)=>{
     e.stopPropagation();
@@ -770,13 +797,10 @@ function defRowWithActions(d, showDatePicker){
 }
 
 function wireDefRowActions(){
-  document.querySelectorAll('.def2-done').forEach(b=>b.onclick=async(e)=>{
+  document.querySelectorAll('.def2-done').forEach(b=>b.onclick=(e)=>{
     e.stopPropagation();
     const id = e.target.closest('[data-def2]').dataset.def2;
-    const d2 = state.defs.find(d=>d.id===id);
-    if(!d2){ showToast('Could not find that deficiency — try reloading.'); return; }
-    d2.status='Done'; d2.completedDate=todayISO();
-    await sset('defs', state.defs); render();
+    markDefDoneWithTimeCheck(id, render);
   });
   document.querySelectorAll('.def-savedate').forEach(b=>b.onclick=async(e)=>{
     e.stopPropagation();
