@@ -44,6 +44,8 @@ function renderBrief(){
 
   let html = `<div class="section-title">Daily Brief — ${fmtDate(today)}</div>`;
 
+  html += renderSafetyWalkthroughSection();
+
   html += `<div class="section-title" style="margin-top:14px;">Suggested Plan<span class="pill">${plan.used}/${plan.budget}m</span></div>`;
   if(plan.selected.length===0){
     html += `<div class="empty">Nothing of yours due or overdue today.</div>`;
@@ -85,6 +87,7 @@ function renderBrief(){
   wireCardActions();
   wireScheduleActions();
   wireDragReorder();
+  wireSafetyWalkthroughActions();
 }
 
 /* Wraps a scheduled-plan card with a drag handle so Josh can reorder today's
@@ -129,6 +132,78 @@ function wireDragReorder(){
       };
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
+    });
+  });
+}
+
+/* Daily safety walkthrough: a free-text on-site/paperwork note plus hazard
+   photos, one record per calendar day, site-wide. Shown first on Brief -
+   safety always comes before everything else in this app. */
+function renderSafetyWalkthroughSection(){
+  const w = todaySafetyWalkthrough();
+  let html = `<div class="section-title">Daily Safety Walkthrough</div>`;
+  if(!w){
+    html += `<div class="card"><button class="btn" id="startWalkthroughBtn" style="width:100%;">Start Today's Walkthrough</button></div>`;
+    return html;
+  }
+  html += `<div class="card">
+    <label>On-Site &amp; Paperwork Notes</label>
+    <textarea id="walkthroughNotes" style="min-height:60px;" placeholder="Who's on site today, and have they filled out their daily paperwork?">${escapeHtml(w.onSiteNotes||'')}</textarea>
+    <button class="btn small ghost" id="saveWalkthroughNotesBtn" style="margin-top:8px;">Save Notes</button>
+  </div>`;
+  html += `<div class="item-meta" style="margin:10px 4px 6px; font-weight:700;">Hazard Photos<span class="pill" style="margin-left:6px;">${w.hazards.length}</span></div>`;
+  if(w.hazards.length){
+    html += `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">`;
+    for(const h of w.hazards){
+      html += `<div class="hazard-photo">
+        <img src="${escapeHtml(h.photoUrl)}" alt="Hazard photo">
+        <button class="hazard-photo-remove" data-hazardid="${escapeHtml(h.id)}">×</button>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  html += `<input type="file" accept="image/*" capture="environment" id="hazardPhotoInput" style="display:none;">
+    <button class="btn small" id="addHazardPhotoBtn">+ Add Hazard Photo</button>`;
+  return html;
+}
+
+function wireSafetyWalkthroughActions(){
+  const startBtn = document.getElementById('startWalkthroughBtn');
+  if(startBtn) startBtn.onclick = async()=>{ await ensureTodayWalkthrough(); render(); };
+
+  const saveNotesBtn = document.getElementById('saveWalkthroughNotesBtn');
+  if(saveNotesBtn) saveNotesBtn.onclick = async()=>{
+    const w = todaySafetyWalkthrough();
+    if(!w) return;
+    await saveWalkthroughNotes(w.id, document.getElementById('walkthroughNotes').value);
+    showToast('Notes saved.');
+  };
+
+  const addPhotoBtn = document.getElementById('addHazardPhotoBtn');
+  const photoInput = document.getElementById('hazardPhotoInput');
+  if(addPhotoBtn && photoInput){
+    addPhotoBtn.onclick = ()=>photoInput.click();
+    photoInput.onchange = async(e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      const originalLabel = addPhotoBtn.textContent;
+      addPhotoBtn.disabled = true; addPhotoBtn.textContent = 'Uploading…';
+      const url = await uploadHazardPhoto(file);
+      addPhotoBtn.disabled = false; addPhotoBtn.textContent = originalLabel;
+      photoInput.value = '';
+      if(!url){ showToast("Couldn't upload photo — check your connection and try again."); return; }
+      const w = todaySafetyWalkthrough();
+      await addHazardPhoto(w.id, url);
+      render();
+    };
+  }
+
+  document.querySelectorAll('.hazard-photo-remove').forEach(b=>b.onclick=(e)=>{
+    const hazardId = e.target.dataset.hazardid;
+    const w = todaySafetyWalkthrough();
+    showConfirm('Remove this hazard photo?', async()=>{
+      await removeHazardPhoto(w.id, hazardId);
+      render();
     });
   });
 }

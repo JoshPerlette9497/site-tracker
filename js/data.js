@@ -88,7 +88,7 @@ const DEFAULT_MASTER = [
 ];
 
 /* ---------- state ---------- */
-let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[] };
+let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[] };
 let activeTab = 'today';
 let selectedScheduleUnit = null;
 let selectedLogDate = null;
@@ -125,6 +125,7 @@ async function loadAll(){
   state.defs = await sget('defs', []);
   state.schedule = await sget('schedule', []);
   state.planOrder = await sget('planOrder', []);
+  state.safetyWalkthroughs = await sget('safetyWalkthroughs', []);
   state.lastBackup = await sget('lastBackup', null);
   state.logHistory = await sget('logHistory', null);
   state.roundHistory = await sget('roundHistory', []);
@@ -448,6 +449,45 @@ async function savePlanOrder(idsInOrder){
     return info && !(info.kind==='def' && info.ref.status==='Done');
   });
   await sset('planOrder', state.planOrder);
+}
+
+/* ---------- daily safety walkthrough (hazard photos + on-site notes) ----------
+   One record per calendar day, site-wide (not per-unit) - hazards found
+   walking the whole site aren't naturally tied to a single construction
+   unit. Photos live in Supabase Storage; only the resulting URL is stored
+   here, same key-value pattern as everything else. */
+function todaySafetyWalkthrough(){
+  return state.safetyWalkthroughs.find(w=>w.date===todayISO()) || null;
+}
+async function ensureTodayWalkthrough(){
+  let w = todaySafetyWalkthrough();
+  if(!w){
+    w = {id:uid(), date:todayISO(), onSiteNotes:'', hazards:[], createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()};
+    state.safetyWalkthroughs.push(w);
+    await sset('safetyWalkthroughs', state.safetyWalkthroughs);
+  }
+  return w;
+}
+async function saveWalkthroughNotes(walkthroughId, notes){
+  const w = state.safetyWalkthroughs.find(x=>x.id===walkthroughId);
+  if(!w) return;
+  w.onSiteNotes = notes;
+  w.updatedAt = new Date().toISOString();
+  await sset('safetyWalkthroughs', state.safetyWalkthroughs);
+}
+async function addHazardPhoto(walkthroughId, photoUrl){
+  const w = state.safetyWalkthroughs.find(x=>x.id===walkthroughId);
+  if(!w) return;
+  w.hazards.push({id:uid(), photoUrl, createdAt:new Date().toISOString()});
+  w.updatedAt = new Date().toISOString();
+  await sset('safetyWalkthroughs', state.safetyWalkthroughs);
+}
+async function removeHazardPhoto(walkthroughId, hazardId){
+  const w = state.safetyWalkthroughs.find(x=>x.id===walkthroughId);
+  if(!w) return;
+  w.hazards = w.hazards.filter(h=>h.id!==hazardId);
+  w.updatedAt = new Date().toISOString();
+  await sset('safetyWalkthroughs', state.safetyWalkthroughs);
 }
 
 function makeInstance(unitId, masterId){

@@ -18,6 +18,28 @@ Currently backed by Supabase (already set up):
 - RLS policy on `app_data` requires every request to carry an `x-site-key` header matching a shared passphrase (see "Access code" below) — replaced the old wide-open anon policy once the site moved to a public GitHub Pages URL.
 - The anon key is in `js/storage.js` under `SUPABASE_ANON_KEY` — safe to keep client-side (that's how Supabase's anon key is designed to work); the RLS policy above is what actually gates read/write access now.
 
+## Hazard photo storage (one-time setup required)
+The daily Safety Walkthrough feature (Brief tab) uploads hazard photos to a
+Supabase Storage bucket named `hazard-photos` (`js/storage.js`:
+`uploadHazardPhoto()`). This bucket does **not exist by default** — Claude
+Code can't provision Supabase infrastructure, so Josh needs to create it
+once via the Supabase dashboard:
+
+1. Supabase dashboard → **Storage** → **New bucket** → name it exactly `hazard-photos`.
+2. Set it to **Public bucket** (matches this app's existing trust model: the
+   anon key is already public by design, and the real access gate is the
+   `x-site-key` passphrase at the app layer, not per-object security). A
+   fully private bucket would need custom Storage RLS policies referencing
+   request headers — possible, but meaningfully more setup/risk than this
+   app's current model calls for.
+3. That's it — no policies to write. Until this bucket exists, photo
+   uploads will fail with a toast ("Couldn't upload photo...") but nothing
+   else in the app breaks.
+
+Note the tradeoff: hazard photo URLs are public-if-guessed (protected by
+URL obscurity, not auth) — same posture as the rest of this public-repo app,
+but worth knowing before storing anything sensitive as a "hazard photo."
+
 ## Access code
 - The app prompts for a passphrase on first load per device (`js/app.js`: `ensureSiteKey()`), stores it in `localStorage`, and sends it as the `x-site-key` header on every Supabase request (`js/storage.js`).
 - A wrong/missing code is verified against Supabase with a real write+read round-trip — on rejection it clears the stored value and re-prompts rather than silently loading empty/default data.

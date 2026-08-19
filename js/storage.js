@@ -41,6 +41,33 @@ async function sset(key, value){
     return false;
   }
 }
+/* Supabase Storage bucket for hazard photos - must be created (and set to
+   "Public bucket") in the Supabase dashboard first; this app has no way to
+   provision infrastructure on its own. See README for the one-time setup. */
+const SUPABASE_STORAGE_BUCKET = 'hazard-photos';
+async function uploadHazardPhoto(file){
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
+  const path = `${todayISO()}/${uid()}.${ext}`;
+  try{
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${SUPABASE_STORAGE_BUCKET}/${path}`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': file.type || 'image/jpeg',
+        'x-site-key': getSiteKey()
+      },
+      body: file
+    });
+    if(!res.ok){
+      console.error('hazard photo upload failed', res.status, await res.text().catch(()=>''));
+      return null;
+    }
+    return `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_STORAGE_BUCKET}/${path}`;
+  }catch(e){
+    console.error('hazard photo upload failed', e);
+    return null;
+  }
+}
 function uid(){ return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
 function todayISO(){ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
 function addDays(iso, n){ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
