@@ -88,7 +88,7 @@ const DEFAULT_MASTER = [
 ];
 
 /* ---------- state ---------- */
-let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[] };
+let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[] };
 let activeTab = 'today';
 let selectedScheduleUnit = null;
 let selectedLogDate = null;
@@ -124,6 +124,7 @@ async function loadAll(){
   state.instances = await sget('instances', null);
   state.defs = await sget('defs', []);
   state.schedule = await sget('schedule', []);
+  state.planOrder = await sget('planOrder', []);
   state.lastBackup = await sget('lastBackup', null);
   state.logHistory = await sget('logHistory', null);
   state.roundHistory = await sget('roundHistory', []);
@@ -423,6 +424,30 @@ function upcomingPlannedTasks(){
     }
   }
   return items.sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate));
+}
+
+/* ---------- manual drag-and-drop order for today's Suggested Plan ----------
+   Purely a display-order preference layered on top of buildSuggestedPlan()'s
+   own selection/budget logic - it never changes WHICH tasks make today's
+   cut, only what order they're shown in. Items not yet touched keep their
+   natural computed order and sort after anything Josh has explicitly placed. */
+function scheduleItemKey(item){
+  return item.type==='def' ? 'd_'+item.ref.id : 'c_'+item.groupInstance.id;
+}
+function applyManualOrder(items){
+  const index = new Map(state.planOrder.map((id,i)=>[id,i]));
+  return items.map((item,i)=>({item, i, rank: index.has(scheduleItemKey(item)) ? index.get(scheduleItemKey(item)) : Infinity}))
+    .sort((a,b)=> a.rank-b.rank || a.i-b.i)
+    .map(x=>x.item);
+}
+/* Saves the new order and prunes ids that no longer resolve to an open task,
+   so this list doesn't grow forever with stale entries from finished work. */
+async function savePlanOrder(idsInOrder){
+  state.planOrder = idsInOrder.filter(id=>{
+    const info = resolveScheduleTask(id);
+    return info && !(info.kind==='def' && info.ref.status==='Done');
+  });
+  await sset('planOrder', state.planOrder);
 }
 
 function makeInstance(unitId, masterId){

@@ -48,10 +48,10 @@ function renderBrief(){
   if(plan.selected.length===0){
     html += `<div class="empty">Nothing of yours due or overdue today.</div>`;
   } else {
-    html += plan.selected.map(item => item.type==='def'
+    html += `<div id="planScheduleList">` + applyManualOrder(plan.selected).map(item => draggableScheduleItem(item, item.type==='def'
       ? cardForDef(item.ref, dueStatus(item.ref.dueDate, item.ref.status))
       : planPhaseCard(item)
-    ).join('');
+    )).join('') + `</div>`;
   }
   if(plan.deferred.length>0){
     html += `<div class="section-title" style="margin-top:10px;">Didn't Fit Today<span class="pill">${plan.deferred.length}</span></div>`;
@@ -84,6 +84,53 @@ function renderBrief(){
   app.innerHTML = html;
   wireCardActions();
   wireScheduleActions();
+  wireDragReorder();
+}
+
+/* Wraps a scheduled-plan card with a drag handle so Josh can reorder today's
+   list by hand. Uses Pointer Events (not native HTML5 drag-and-drop, which
+   doesn't work reliably on mobile Safari/touch) so it works the same on
+   phone and desktop. */
+function draggableScheduleItem(item, innerHtml){
+  const planId = scheduleItemKey(item);
+  return `<div class="plan-schedule-item" data-planid="${escapeHtml(planId)}">
+    <div class="drag-handle" title="Drag to reorder">⠿</div>
+    <div class="plan-schedule-item-body">${innerHtml}</div>
+  </div>`;
+}
+
+function wireDragReorder(){
+  const container = document.getElementById('planScheduleList');
+  if(!container) return;
+  container.querySelectorAll('.drag-handle').forEach(handle=>{
+    handle.addEventListener('pointerdown', (e)=>{
+      e.preventDefault();
+      const dragEl = handle.closest('.plan-schedule-item');
+      dragEl.classList.add('dragging');
+
+      const onMove = (ev)=>{
+        // Find the item whose midpoint sits just below the pointer, and drop
+        // dragEl right before it (or at the end if the pointer is past everyone).
+        let afterElement = null, closestOffset = -Infinity;
+        for(const child of container.querySelectorAll('.plan-schedule-item:not(.dragging)')){
+          const box = child.getBoundingClientRect();
+          const offset = ev.clientY - box.top - box.height/2;
+          if(offset < 0 && offset > closestOffset){ closestOffset = offset; afterElement = child; }
+        }
+        if(afterElement) container.insertBefore(dragEl, afterElement);
+        else container.appendChild(dragEl);
+      };
+      const onUp = ()=>{
+        dragEl.classList.remove('dragging');
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        const newOrder = [...container.querySelectorAll('.plan-schedule-item')].map(el=>el.dataset.planid);
+        savePlanOrder(newOrder);
+      };
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    });
+  });
 }
 
 /* One overflow (didn't-fit-budget) row from buildSuggestedPlan()'s deferred
