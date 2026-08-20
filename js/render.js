@@ -1034,6 +1034,8 @@ function renderDefs(){
     <button class="btn small defs-filter-pick ${defsFilterTab==='done'?'':'ghost'}" data-filter="done" style="flex:1;">Done <span class="pill">${done.length}</span></button>
   </div>`;
 
+  html += `<button class="btn small ghost" id="copyDefListBtn" style="margin:0 4px 14px; width:calc(100% - 8px);">Copy List (respects filters above)</button>`;
+
   html += `<div id="defsListContainer">`;
   if(defsFilterTab==='dated'){
     if(dated.length===0) html += `<div class="empty">Nothing with a due date yet.</div>`;
@@ -1066,6 +1068,24 @@ function renderDefs(){
     defOwnerFilter = b.dataset.owner;
     render();
   });
+  document.getElementById('copyDefListBtn').onclick = async ()=>{
+    const items = [...document.querySelectorAll('#defsListContainer > div')]
+      .filter(card => card.style.display !== 'none')
+      .map(card => state.defs.find(d=>d.id===card.dataset.def2))
+      .filter(Boolean);
+    if(items.length===0){ showToast('Nothing to copy — the list is empty.'); return; }
+    const text = items.map(d=>{
+      const when = d.status==='Done' ? `done${d.completedDate?' '+fmtDate(d.completedDate):''}` : (d.dueDate ? `due ${fmtDate(d.dueDate)}` : 'no due date');
+      return `${d.description} — ${when}`;
+    }).join('\n');
+    try{
+      await navigator.clipboard.writeText(text);
+      showToast(`Copied ${items.length} item${items.length===1?'':'s'} to clipboard.`);
+    }catch(e){
+      console.error('clipboard copy failed', e);
+      showToast("Couldn't copy — check clipboard permissions and try again.");
+    }
+  };
   wireDefRowActions();
   applyDefSearchFilter();
 }
