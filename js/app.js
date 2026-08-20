@@ -1,3 +1,35 @@
+/* ---------- select arrow wrapping ----------
+   iOS Safari never fully honors appearance:none on <select> - its native
+   arrow decoration can't be resized or hidden via CSS on the element
+   itself (a long-standing WebKit limitation). Every select gets wrapped
+   with an independent CSS-drawn arrow overlay instead, so the visible
+   arrow doesn't depend on Safari cooperating. Runs via a MutationObserver
+   so it catches every select as it appears, from any tab render or modal,
+   without needing to touch each individual render function. */
+function wrapSelectArrow(select){
+  if(select.parentElement && select.parentElement.classList.contains('select-wrap')) return;
+  const wrap = document.createElement('span');
+  wrap.className = 'select-wrap';
+  select.parentNode.insertBefore(wrap, select);
+  wrap.appendChild(select);
+  const arrow = document.createElement('span');
+  arrow.className = 'select-wrap-arrow';
+  wrap.appendChild(arrow);
+}
+function wrapAllSelects(root){
+  root.querySelectorAll('select').forEach(wrapSelectArrow);
+}
+wrapAllSelects(document.body);
+new MutationObserver((mutations)=>{
+  for(const m of mutations){
+    for(const node of m.addedNodes){
+      if(node.nodeType !== 1) continue;
+      if(node.tagName === 'SELECT') wrapSelectArrow(node);
+      else if(node.querySelectorAll) wrapAllSelects(node);
+    }
+  }
+}).observe(document.body, {childList:true, subtree:true});
+
 /* ---------- tabs ---------- */
 document.querySelectorAll('nav.tabs button').forEach(b=>{
   b.onclick = ()=>{
