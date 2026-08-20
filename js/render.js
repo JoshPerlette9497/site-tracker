@@ -194,21 +194,37 @@ function wireDragReorder(){
    safety always comes before everything else in this app. */
 function renderSafetyWalkthroughSection(){
   const w = todaySafetyWalkthrough();
-  let html = `<div class="section-title">Daily Safety Walkthrough</div>`;
-  if(!w){
-    html += `<div class="card"><button class="btn" id="startWalkthroughBtn" style="width:100%;">Start Today's Walkthrough</button></div>`;
-    return html;
-  }
-  html += `<div class="card">
-    <label>On-Site &amp; Paperwork Notes</label>
-    <textarea id="walkthroughNotes" style="min-height:60px;" placeholder="Who's on site today, and have they filled out their daily paperwork?">${escapeHtml(w.onSiteNotes||'')}</textarea>
-    <button class="btn small ghost" id="saveWalkthroughNotesBtn" style="margin-top:8px;">Save Notes</button>
-  </div>`;
+  const totalItems = SAFETY_CHECKLIST_SEED.reduce((n,g)=>n+g.items.length,0);
+  const doneItems = w ? SAFETY_CHECKLIST_SEED.reduce((n,g)=>n+g.items.filter(it=>w.itemStatus[it.id]).length,0) : 0;
+  const isOpen = safetyWalkthroughOpen;
 
-  for(const g of SAFETY_CHECKLIST_SEED){
-    const done = g.items.filter(it=>w.itemStatus[it.id]).length;
-    html += `<div class="section-title" style="margin-top:14px;">${escapeHtml(g.name)}<span class="pill">${done}/${g.items.length}</span></div>`;
-    for(const it of g.items){ html += safetyItemRow(w, it); }
+  let html = `<div class="card">
+    <div class="row safety-walkthrough-toggle" style="cursor:pointer;">
+      <div>
+        <div class="item-name">Daily Safety Walkthrough</div>
+        <div class="item-meta">${w ? `${doneItems}/${totalItems} checked` : 'Not started'}</div>
+      </div>
+      <span style="font-size:16px;">${isOpen?'▾':'▸'}</span>
+    </div>`;
+  if(isOpen){
+    html += `<div style="margin-top:10px;">`;
+    if(!w){
+      html += `<button class="btn" id="startWalkthroughBtn" style="width:100%;">Start Today's Walkthrough</button>`;
+    } else {
+      html += `<label>On-Site &amp; Paperwork Notes</label>
+        <textarea id="walkthroughNotes" style="min-height:60px;" placeholder="Who's on site today, and have they filled out their daily paperwork?">${escapeHtml(w.onSiteNotes||'')}</textarea>
+        <button class="btn small ghost" id="saveWalkthroughNotesBtn" style="margin-top:8px;">Save Notes</button>`;
+    }
+    html += `</div>`;
+  }
+  html += `</div>`;
+
+  if(isOpen && w){
+    for(const g of SAFETY_CHECKLIST_SEED){
+      const done = g.items.filter(it=>w.itemStatus[it.id]).length;
+      html += `<div class="section-title" style="margin-top:14px;">${escapeHtml(g.name)}<span class="pill">${done}/${g.items.length}</span></div>`;
+      for(const it of g.items){ html += safetyItemRow(w, it); }
+    }
   }
   return html;
 }
@@ -240,6 +256,11 @@ function safetyItemRow(w, it){
 }
 
 function wireSafetyWalkthroughActions(){
+  document.querySelectorAll('.safety-walkthrough-toggle').forEach(row=>row.onclick=()=>{
+    safetyWalkthroughOpen = !safetyWalkthroughOpen;
+    render();
+  });
+
   const startBtn = document.getElementById('startWalkthroughBtn');
   if(startBtn) startBtn.onclick = async()=>{ await ensureTodayWalkthrough(); render(); };
 
