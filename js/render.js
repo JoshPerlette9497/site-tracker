@@ -455,6 +455,7 @@ function markDefDoneWithTimeCheck(id, onComplete){
 function openEditDefModal(defId, onSaved){
   const d = state.defs.find(x=>x.id===defId);
   if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
+  const originalDueDate = d.dueDate;
   let overbookConfirmed = false;
   showModal(`
     <h2>Edit Deficiency</h2>
@@ -507,6 +508,9 @@ function openEditDefModal(defId, onSaved){
     d.description = desc;
     d.owner = owner;
     d.dueDate = dueDate;
+    // A planned date is a commitment made around a specific due date; once
+    // that due date actually changes, the old plan no longer applies to it.
+    if(dueDate !== originalDueDate) d.plannedDate = null;
     d.priority = document.getElementById('edPriority').value;
     d.category = document.getElementById('edCategory').value;
     const estVal = document.getElementById('edEstimate').value;
@@ -1144,6 +1148,7 @@ function wireDefRowActions(){
     if(!val){ showToast('Pick a date first.'); return; }
     const d2 = state.defs.find(d=>d.id===id);
     d2.dueDate = val;
+    d2.plannedDate = null; // old plan (if any) was made around whatever due date this had before
     await sset('defs', state.defs);
     showToast('Due date set.');
     render();
