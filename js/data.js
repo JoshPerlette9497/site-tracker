@@ -150,6 +150,7 @@ async function loadAll(){
   await migrateDefPriority();
   await migrateDefCategory();
   await migrateChecklistMatchPhases();
+  await migrateSafetyWalkthroughShape();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -280,6 +281,20 @@ async function migrateChecklistMatchPhases(){
     if(g.estimatedMinutes !== 20){ g.estimatedMinutes = 20; changed = true; }
   }
   if(changed) await sset('checklistGroups', state.checklistGroups);
+}
+
+/* Backfills itemStatus/itemPhotos/itemNotes on any walkthrough record
+   created before the safety checklist rework (e.g. a bare "Start Today's
+   Walkthrough" tap with no old-shaped hazards ever added), so it doesn't
+   break under the new per-item structure. */
+async function migrateSafetyWalkthroughShape(){
+  let changed = false;
+  for(const w of state.safetyWalkthroughs){
+    if(!w.itemStatus){ w.itemStatus = {}; changed = true; }
+    if(!w.itemPhotos){ w.itemPhotos = {}; changed = true; }
+    if(!w.itemNotes){ w.itemNotes = {}; changed = true; }
+  }
+  if(changed) await sset('safetyWalkthroughs', state.safetyWalkthroughs);
 }
 
 function makeGroupInstance(unitId, groupId){
@@ -451,18 +466,54 @@ async function savePlanOrder(idsInOrder){
   await sset('planOrder', state.planOrder);
 }
 
-/* ---------- daily safety walkthrough (hazard photos + on-site notes) ----------
-   One record per calendar day, site-wide (not per-unit) - hazards found
-   walking the whole site aren't naturally tied to a single construction
-   unit. Photos live in Supabase Storage; only the resulting URL is stored
-   here, same key-value pattern as everything else. */
+/* ---------- daily safety walkthrough (checklist + per-item photos/notes) ----------
+   One record per calendar day, site-wide (not per-unit) - a safety walk
+   covers the whole site, not one construction unit. The checklist itself
+   (groups/items) is fixed content, not user-editable data, same idea as
+   CHECKLIST_GROUPS_SEED for phase checks. Per-item checked state, notes,
+   and photos live on the day's walkthrough record, keyed by item id.
+   Photos live in Supabase Storage; only the resulting URL is stored here. */
+const SAFETY_CHECKLIST_SEED = [
+  {id:'job-info', name:'Job Information', items:[
+    {id:'medcenter', text:"Post the medical center's number"},
+    {id:'toolbox', text:'Keep toolbox talks current'},
+    {id:'barricade', text:'Sign/barricade work areas'},
+  ]},
+  {id:'housekeeping', name:'Housekeeping', items:[
+    {id:'trip', text:'Keep work areas clear of trip hazards'},
+    {id:'waste', text:'Use waste containers'},
+    {id:'walkways', text:'Keep walkways clear'},
+    {id:'cords', text:'Keep cords off the floor'},
+  ]},
+  {id:'fire', name:'Fire Prevention', items:[
+    {id:'extinguishers', text:'Keep extinguishers stocked and inspected'},
+    {id:'firstaid', text:'Keep first aid kits stocked and inspected'},
+    {id:'nosmoking', text:'Enforce no-smoking signage near flammables'},
+  ]},
+  {id:'tools', name:'Hand, Power & Powder-Actuated Tools', items:[
+    {id:'inspecttools', text:'Inspect hand tools'},
+    {id:'guards', text:'Keep guards in place'},
+    {id:'powdertools', text:'Ensure only authorized operators use powder tools'},
+  ]},
+  {id:'fallprotection', name:'Fall Protection', items:[
+    {id:'railsfalls', text:'Secure rails and cables to prevent falls'},
+    {id:'railsobjects', text:'Secure rails and cables to prevent falling objects'},
+  ]},
+  {id:'ladders', name:'Ladders', items:[
+    {id:'ladder36', text:'Ladders must extend 36" above the landing'},
+    {id:'laddersecured', text:'Ladders must be secured'},
+    {id:'ladderdamaged', text:'Ladders must be pulled if damaged'},
+    {id:'ladderopen', text:'Ladders must be fully opened if step-style'},
+  ]},
+];
+
 function todaySafetyWalkthrough(){
   return state.safetyWalkthroughs.find(w=>w.date===todayISO()) || null;
 }
 async function ensureTodayWalkthrough(){
   let w = todaySafetyWalkthrough();
   if(!w){
-    w = {id:uid(), date:todayISO(), onSiteNotes:'', hazards:[], createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()};
+    w = {id:uid(), date:todayISO(), onSiteNotes:'', itemStatus:{}, itemPhotos:{}, itemNotes:{}, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()};
     state.safetyWalkthroughs.push(w);
     await sset('safetyWalkthroughs', state.safetyWalkthroughs);
   }
@@ -475,17 +526,32 @@ async function saveWalkthroughNotes(walkthroughId, notes){
   w.updatedAt = new Date().toISOString();
   await sset('safetyWalkthroughs', state.safetyWalkthroughs);
 }
-async function addHazardPhoto(walkthroughId, photoUrl){
+async function toggleSafetyItem(walkthroughId, itemId, checked){
   const w = state.safetyWalkthroughs.find(x=>x.id===walkthroughId);
   if(!w) return;
-  w.hazards.push({id:uid(), photoUrl, createdAt:new Date().toISOString()});
+  w.itemStatus[itemId] = checked;
   w.updatedAt = new Date().toISOString();
   await sset('safetyWalkthroughs', state.safetyWalkthroughs);
 }
-async function removeHazardPhoto(walkthroughId, hazardId){
+async function saveSafetyItemNote(walkthroughId, itemId, note){
   const w = state.safetyWalkthroughs.find(x=>x.id===walkthroughId);
   if(!w) return;
-  w.hazards = w.hazards.filter(h=>h.id!==hazardId);
+  w.itemNotes[itemId] = note;
+  w.updatedAt = new Date().toISOString();
+  await sset('safetyWalkthroughs', state.safetyWalkthroughs);
+}
+async function addSafetyItemPhoto(walkthroughId, itemId, photoUrl){
+  const w = state.safetyWalkthroughs.find(x=>x.id===walkthroughId);
+  if(!w) return;
+  if(!w.itemPhotos[itemId]) w.itemPhotos[itemId] = [];
+  w.itemPhotos[itemId].push({id:uid(), photoUrl, createdAt:new Date().toISOString()});
+  w.updatedAt = new Date().toISOString();
+  await sset('safetyWalkthroughs', state.safetyWalkthroughs);
+}
+async function removeSafetyItemPhoto(walkthroughId, itemId, photoId){
+  const w = state.safetyWalkthroughs.find(x=>x.id===walkthroughId);
+  if(!w) return;
+  w.itemPhotos[itemId] = (w.itemPhotos[itemId]||[]).filter(p=>p.id!==photoId);
   w.updatedAt = new Date().toISOString();
   await sset('safetyWalkthroughs', state.safetyWalkthroughs);
 }

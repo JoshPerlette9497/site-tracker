@@ -41,11 +41,12 @@ async function sset(key, value){
     return false;
   }
 }
-/* Supabase Storage bucket for hazard photos - must be created (and set to
-   "Public bucket") in the Supabase dashboard first; this app has no way to
-   provision infrastructure on its own. See README for the one-time setup. */
+/* Supabase Storage bucket for safety-walkthrough photos - must be created
+   (and set to "Public bucket") in the Supabase dashboard first; this app
+   has no way to provision infrastructure on its own. See README for the
+   one-time setup. */
 const SUPABASE_STORAGE_BUCKET = 'hazard-photos';
-async function uploadHazardPhoto(file){
+async function uploadSafetyPhoto(file){
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
   const path = `${todayISO()}/${uid()}.${ext}`;
   try{
@@ -59,12 +60,12 @@ async function uploadHazardPhoto(file){
       body: file
     });
     if(!res.ok){
-      console.error('hazard photo upload failed', res.status, await res.text().catch(()=>''));
+      console.error('safety photo upload failed', res.status, await res.text().catch(()=>''));
       return null;
     }
     return `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_STORAGE_BUCKET}/${path}`;
   }catch(e){
-    console.error('hazard photo upload failed', e);
+    console.error('safety photo upload failed', e);
     return null;
   }
 }

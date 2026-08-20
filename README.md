@@ -18,10 +18,10 @@ Currently backed by Supabase (already set up):
 - RLS policy on `app_data` requires every request to carry an `x-site-key` header matching a shared passphrase (see "Access code" below) — replaced the old wide-open anon policy once the site moved to a public GitHub Pages URL.
 - The anon key is in `js/storage.js` under `SUPABASE_ANON_KEY` — safe to keep client-side (that's how Supabase's anon key is designed to work); the RLS policy above is what actually gates read/write access now.
 
-## Hazard photo storage (one-time setup required)
-The daily Safety Walkthrough feature (Brief tab) uploads hazard photos to a
-Supabase Storage bucket named `hazard-photos` (`js/storage.js`:
-`uploadHazardPhoto()`). This bucket does **not exist by default** — Claude
+## Safety walkthrough photo storage (one-time setup required)
+The daily Safety Walkthrough feature (Brief tab) uploads per-checklist-item
+photos to a Supabase Storage bucket named `hazard-photos` (`js/storage.js`:
+`uploadSafetyPhoto()`). This bucket does **not exist by default** — Claude
 Code can't provision Supabase infrastructure, so Josh needs to create it
 once via the Supabase dashboard:
 

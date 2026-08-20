@@ -204,19 +204,38 @@ function renderSafetyWalkthroughSection(){
     <textarea id="walkthroughNotes" style="min-height:60px;" placeholder="Who's on site today, and have they filled out their daily paperwork?">${escapeHtml(w.onSiteNotes||'')}</textarea>
     <button class="btn small ghost" id="saveWalkthroughNotesBtn" style="margin-top:8px;">Save Notes</button>
   </div>`;
-  html += `<div class="item-meta" style="margin:10px 4px 6px; font-weight:700;">Hazard Photos<span class="pill" style="margin-left:6px;">${w.hazards.length}</span></div>`;
-  if(w.hazards.length){
-    html += `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px;">`;
-    for(const h of w.hazards){
+
+  for(const g of SAFETY_CHECKLIST_SEED){
+    const done = g.items.filter(it=>w.itemStatus[it.id]).length;
+    html += `<div class="section-title" style="margin-top:14px;">${escapeHtml(g.name)}<span class="pill">${done}/${g.items.length}</span></div>`;
+    for(const it of g.items){ html += safetyItemRow(w, it); }
+  }
+  return html;
+}
+
+function safetyItemRow(w, it){
+  const checked = !!w.itemStatus[it.id];
+  const photos = w.itemPhotos[it.id] || [];
+  const note = w.itemNotes[it.id] || '';
+  let html = `<div class="card safety-item">
+    <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+      <input type="checkbox" class="safety-item-checkbox" data-itemid="${escapeHtml(it.id)}" ${checked?'checked':''} style="width:18px; height:18px; margin-top:2px; flex-shrink:0;">
+      <span style="${checked?'text-decoration:line-through; opacity:0.6;':''}">${escapeHtml(it.text)}</span>
+    </label>
+    <input type="text" class="safety-item-note" data-itemid="${escapeHtml(it.id)}" placeholder="Add note…" value="${escapeHtml(note)}" style="margin-top:8px;">`;
+  if(photos.length){
+    html += `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;">`;
+    for(const p of photos){
       html += `<div class="hazard-photo">
-        <img src="${escapeHtml(h.photoUrl)}" alt="Hazard photo">
-        <button class="hazard-photo-remove" data-hazardid="${escapeHtml(h.id)}">×</button>
+        <img src="${escapeHtml(p.photoUrl)}" alt="Photo">
+        <button class="hazard-photo-remove safety-item-photo-remove" data-itemid="${escapeHtml(it.id)}" data-photoid="${escapeHtml(p.id)}">×</button>
       </div>`;
     }
     html += `</div>`;
   }
-  html += `<input type="file" accept="image/*" capture="environment" id="hazardPhotoInput" style="display:none;">
-    <button class="btn small" id="addHazardPhotoBtn">+ Add Hazard Photo</button>`;
+  html += `<input type="file" accept="image/*" capture="environment" multiple class="safety-item-photo-input" data-itemid="${escapeHtml(it.id)}" style="display:none;">
+    <button class="btn small ghost safety-item-photo-btn" data-itemid="${escapeHtml(it.id)}" style="margin-top:8px;">+ Photos${photos.length?' ('+photos.length+')':''}</button>
+  </div>`;
   return html;
 }
 
@@ -232,30 +251,58 @@ function wireSafetyWalkthroughActions(){
     showToast('Notes saved.');
   };
 
-  const addPhotoBtn = document.getElementById('addHazardPhotoBtn');
-  const photoInput = document.getElementById('hazardPhotoInput');
-  if(addPhotoBtn && photoInput){
-    addPhotoBtn.onclick = ()=>photoInput.click();
-    photoInput.onchange = async(e)=>{
-      const file = e.target.files[0];
-      if(!file) return;
-      const originalLabel = addPhotoBtn.textContent;
-      addPhotoBtn.disabled = true; addPhotoBtn.textContent = 'Uploading…';
-      const url = await uploadHazardPhoto(file);
-      addPhotoBtn.disabled = false; addPhotoBtn.textContent = originalLabel;
-      photoInput.value = '';
-      if(!url){ showToast("Couldn't upload photo — check your connection and try again."); return; }
+  document.querySelectorAll('.safety-item-checkbox').forEach(cb=>cb.onchange=async(e)=>{
+    const w = todaySafetyWalkthrough();
+    if(!w) return;
+    await toggleSafetyItem(w.id, e.target.dataset.itemid, e.target.checked);
+    render();
+  });
+
+  document.querySelectorAll('.safety-item-note').forEach(input=>{
+    input.onclick = (e)=>e.stopPropagation();
+    input.onchange = async(e)=>{
       const w = todaySafetyWalkthrough();
-      await addHazardPhoto(w.id, url);
+      if(!w) return;
+      await saveSafetyItemNote(w.id, e.target.dataset.itemid, e.target.value);
+    };
+  });
+
+  document.querySelectorAll('.safety-item-photo-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      const input = document.querySelector(`.safety-item-photo-input[data-itemid="${btn.dataset.itemid}"]`);
+      if(input) input.click();
+    };
+  });
+
+  document.querySelectorAll('.safety-item-photo-input').forEach(input=>{
+    input.onchange = async(e)=>{
+      const itemId = e.target.dataset.itemid;
+      const files = [...e.target.files];
+      if(files.length===0) return;
+      const btn = document.querySelector(`.safety-item-photo-btn[data-itemid="${itemId}"]`);
+      const originalLabel = btn ? btn.textContent : '';
+      if(btn) btn.disabled = true;
+      const w = todaySafetyWalkthrough();
+      let uploaded = 0, failed = 0;
+      for(const file of files){
+        if(btn) btn.textContent = `Uploading ${uploaded+failed+1}/${files.length}…`;
+        const url = await uploadSafetyPhoto(file);
+        if(url){ await addSafetyItemPhoto(w.id, itemId, url); uploaded++; }
+        else failed++;
+      }
+      e.target.value = '';
+      if(btn){ btn.disabled = false; btn.textContent = originalLabel; }
+      if(failed) showToast(`${uploaded} photo${uploaded===1?'':'s'} uploaded, ${failed} failed.`);
+      else showToast(`${uploaded} photo${uploaded===1?'':'s'} added.`);
       render();
     };
-  }
+  });
 
-  document.querySelectorAll('.hazard-photo-remove').forEach(b=>b.onclick=(e)=>{
-    const hazardId = e.target.dataset.hazardid;
+  document.querySelectorAll('.safety-item-photo-remove').forEach(b=>b.onclick=(e)=>{
+    const itemId = e.target.dataset.itemid, photoId = e.target.dataset.photoid;
     const w = todaySafetyWalkthrough();
-    showConfirm('Remove this hazard photo?', async()=>{
-      await removeHazardPhoto(w.id, hazardId);
+    showConfirm('Remove this photo?', async()=>{
+      await removeSafetyItemPhoto(w.id, itemId, photoId);
       render();
     });
   });
