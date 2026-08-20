@@ -109,24 +109,77 @@ function wireDragReorder(){
     handle.addEventListener('pointerdown', (e)=>{
       e.preventDefault();
       const dragEl = handle.closest('.plan-schedule-item');
+      const startRect = dragEl.getBoundingClientRect();
+      const grabOffsetY = e.clientY - startRect.top;
+      let lastClientY = e.clientY;
+
+      // Placeholder holds dragEl's spot in normal flow so the rest of the
+      // list reflows around it. dragEl itself moves to document.body and
+      // becomes a floating card tracking the pointer directly - pulling it
+      // fully out of the container means every later querySelectorAll on
+      // the container naturally excludes it, no manual filtering needed.
+      const placeholder = document.createElement('div');
+      placeholder.className = 'plan-drag-placeholder';
+      placeholder.style.height = startRect.height + 'px';
+      dragEl.before(placeholder);
+      document.body.appendChild(dragEl);
+
+      Object.assign(dragEl.style, {
+        position:'fixed', left:startRect.left+'px', width:startRect.width+'px',
+        top:startRect.top+'px', zIndex:'1000', pointerEvents:'none'
+      });
       dragEl.classList.add('dragging');
 
-      const onMove = (ev)=>{
-        // Find the item whose midpoint sits just below the pointer, and drop
-        // dragEl right before it (or at the end if the pointer is past everyone).
+      // FLIP-animates the rest of the list sliding apart/together as the
+      // placeholder (the actual drop target) moves between them.
+      function movePlaceholder(){
+        const siblings = [...container.querySelectorAll('.plan-schedule-item')];
         let afterElement = null, closestOffset = -Infinity;
-        for(const child of container.querySelectorAll('.plan-schedule-item:not(.dragging)')){
+        for(const child of siblings){
           const box = child.getBoundingClientRect();
-          const offset = ev.clientY - box.top - box.height/2;
+          const offset = lastClientY - box.top - box.height/2;
           if(offset < 0 && offset > closestOffset){ closestOffset = offset; afterElement = child; }
         }
-        if(afterElement) container.insertBefore(dragEl, afterElement);
-        else container.appendChild(dragEl);
-      };
+        const alreadyThere = afterElement ? placeholder.nextElementSibling===afterElement : placeholder===container.lastElementChild;
+        if(alreadyThere) return;
+
+        const before = new Map(siblings.map(el=>[el, el.getBoundingClientRect()]));
+        if(afterElement) container.insertBefore(placeholder, afterElement);
+        else container.appendChild(placeholder);
+        for(const el of siblings){
+          const b = before.get(el), a = el.getBoundingClientRect();
+          const dy = b.top - a.top;
+          if(dy){
+            el.style.transition = 'none';
+            el.style.transform = `translateY(${dy}px)`;
+            requestAnimationFrame(()=>{
+              el.style.transition = 'transform 150ms ease';
+              el.style.transform = '';
+            });
+          }
+        }
+      }
+
+      let rafId = null;
+      const EDGE = 70, MAX_SPEED = 16;
+      function tick(){
+        dragEl.style.top = (lastClientY - grabOffsetY) + 'px';
+        if(lastClientY < EDGE) window.scrollBy(0, -MAX_SPEED * (1 - lastClientY/EDGE));
+        else if(lastClientY > window.innerHeight - EDGE) window.scrollBy(0, MAX_SPEED * (1 - (window.innerHeight-lastClientY)/EDGE));
+        movePlaceholder();
+        rafId = requestAnimationFrame(tick);
+      }
+      rafId = requestAnimationFrame(tick);
+
+      const onMove = (ev)=>{ lastClientY = ev.clientY; };
       const onUp = ()=>{
-        dragEl.classList.remove('dragging');
+        cancelAnimationFrame(rafId);
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
+        container.insertBefore(dragEl, placeholder);
+        placeholder.remove();
+        Object.assign(dragEl.style, {position:'', left:'', width:'', top:'', zIndex:'', pointerEvents:''});
+        dragEl.classList.remove('dragging');
         const newOrder = [...container.querySelectorAll('.plan-schedule-item')].map(el=>el.dataset.planid);
         savePlanOrder(newOrder);
       };
