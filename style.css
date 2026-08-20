@@ -136,6 +136,19 @@
   }
   .modal h2{margin:0 0 4px; font-size:17px; color:var(--ink);}
   .modal .close{position:absolute; top:14px; right:16px; color:var(--ink-dim); font-size:22px; background:none; border:none;}
+  /* Unit Detail's own header, in normal flow (not the generic overlay
+     .close above) so it can use position:sticky and stay visible while
+     scrolling through a long unit's checklist/history. */
+  .ud-sticky-header{
+    position:sticky; top:0; z-index:5; background:#fff;
+    display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
+    padding-bottom:10px;
+  }
+  .ud-sticky-actions{display:flex; align-items:center; gap:8px; flex-shrink:0;}
+  .ud-sticky-close{
+    color:var(--ink-dim); font-size:22px; line-height:1; background:none; border:none;
+    padding:4px 2px; cursor:pointer;
+  }
   .field-row{display:flex; gap:8px;}
   .field-row > div{flex:1;}
   .divider{height:1px; background:var(--line); margin:14px 0;}

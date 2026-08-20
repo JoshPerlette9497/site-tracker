@@ -701,8 +701,12 @@ function openUnitDetail(unitId){
   const insts = state.instances.filter(i=>i.unitId===unitId);
   const defs = state.defs.filter(d=>d.location===u.name && d.status!=='Done');
   const risk = computeRisk(u);
-  let html = `<div class="row"><div><h2 style="margin-bottom:0;">${escapeHtml(u.name)}</h2><div class="helptext">${escapeHtml(u.project)}${u.active?'':' · inactive'}</div></div>
-    <button class="btn small ghost" id="unitArchiveBtn">${u.active?'Mark Complete':'Reactivate'}</button>
+  let html = `<div class="ud-sticky-header">
+    <div><h2 style="margin-bottom:0;">${escapeHtml(u.name)}</h2><div class="helptext">${escapeHtml(u.project)}${u.active?'':' · inactive'}</div></div>
+    <div class="ud-sticky-actions">
+      <button class="btn small ghost" id="unitArchiveBtn">${u.active?'Mark Complete':'Reactivate'}</button>
+      <button class="ud-sticky-close" id="udStickyClose" title="Close" aria-label="Close">×</button>
+    </div>
   </div><div class="divider"></div>`;
   html += `<div class="section-title" style="margin-top:0;">Round Info</div>`;
   html += `<div class="card">
@@ -802,6 +806,12 @@ function openUnitDetail(unitId){
   showModal(html);
   const newModal = document.querySelector('.modal');
   if(newModal) newModal.scrollTop = prevScrollTop;
+  // The sticky header above has its own close button (stays visible while
+  // scrolling, unlike the generic overlay one) so hide the generic one to
+  // avoid showing two - same pattern promptSiteKeyModal() already uses.
+  const genericClose = document.getElementById('modalClose');
+  if(genericClose) genericClose.style.display = 'none';
+  document.getElementById('udStickyClose').onclick = closeModal;
   document.getElementById('logRoundBtn').onclick = ()=>openRoundModal(unitId);
   document.getElementById('editWalkBtn').onclick = ()=>openEditWalkModal(unitId);
   document.getElementById('unitArchiveBtn').onclick = ()=>{
