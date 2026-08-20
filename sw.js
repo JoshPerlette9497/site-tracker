@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sitelog-v3';
+const CACHE_NAME = 'sitelog-v4';
 const APP_SHELL = [
   './index.html', './manifest.json', './icon-192.png', './icon-512.png', './style.css',
   './js/storage.js', './js/dialogs.js', './js/modal.js', './js/data.js', './js/render.js', './js/app.js'
