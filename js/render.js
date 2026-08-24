@@ -805,6 +805,7 @@ function openUnitDetail(unitId){
         <div class="item-meta" style="font-weight:700;">${fmtDate(r.date)} — ${r.risk}</div>
         <div class="item-meta" style="margin-top:4px;">${escapeHtml(r.currentPhase||'—')}</div>
         <div class="item-meta">Trade: ${escapeHtml(r.crntTrade||'—')}${r.ctEnd?' (ends '+fmtDate(r.ctEnd)+')':''} · Next: ${escapeHtml(r.nextTrade||'—')}</div>
+        ${r.notes?`<div style="font-size:13px; margin-top:6px;">${escapeHtml(r.notes)}</div>`:''}
       </div>`;
     }
   }
@@ -995,6 +996,8 @@ function openRoundModal(unitId){
       <option value="🟡" ${u.riskOverride==='🟡'?'selected':''}>🟡 Yellow</option>
       <option value="🔴" ${u.riskOverride==='🔴'?'selected':''}>🔴 Red</option>
     </select>
+    <label>Notes</label>
+    <textarea id="rNotes" style="min-height:60px;" placeholder="Anything worth noting about this round…"></textarea>
     <div class="divider"></div>
     <button class="btn" id="rSave" style="width:100%;">Save Round</button>
   `);
@@ -1009,7 +1012,7 @@ function openRoundModal(unitId){
     state.roundHistory.push({
       id:uid(), unitId:u.id, unitName:u.name, date:todayISO(),
       currentPhase:u.currentPhase, crntTrade:u.crntTrade, ctEnd:u.ctEnd,
-      nextTrade:u.nextTrade, risk:computeRisk(u)
+      nextTrade:u.nextTrade, risk:computeRisk(u), notes:document.getElementById('rNotes').value.trim()
     });
     await sset('roundHistory', state.roundHistory);
     closeModal();
