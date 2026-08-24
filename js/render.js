@@ -806,6 +806,11 @@ function openUnitDetail(unitId){
         <div class="item-meta" style="margin-top:4px;">${escapeHtml(r.currentPhase||'—')}</div>
         <div class="item-meta">Trade: ${escapeHtml(r.crntTrade||'—')}${r.ctEnd?' (ends '+fmtDate(r.ctEnd)+')':''} · Next: ${escapeHtml(r.nextTrade||'—')}</div>
         ${r.notes?`<div style="font-size:13px; margin-top:6px;">${escapeHtml(r.notes)}</div>`:''}
+        ${r.tradeCompliance?`<div style="font-size:13px; margin-top:6px;"><b>On time/clean/safety:</b> ${escapeHtml(r.tradeCompliance)}</div>`:''}
+        ${r.cleanup?`<div style="font-size:13px; margin-top:4px;"><b>Cleanup:</b> ${escapeHtml(r.cleanup)}</div>`:''}
+        ${r.nextTradeRisk?`<div style="font-size:13px; margin-top:4px;"><b>Risk for next trade:</b> ${escapeHtml(r.nextTradeRisk)}</div>`:''}
+        ${r.next14Risk?`<div style="font-size:13px; margin-top:4px;"><b>Risk — next 14 days:</b> ${escapeHtml(r.next14Risk)}</div>`:''}
+        ${r.next90Prep?`<div style="font-size:13px; margin-top:4px;"><b>Line up — next 1-3 months:</b> ${escapeHtml(r.next90Prep)}</div>`:''}
       </div>`;
     }
   }
@@ -999,6 +1004,17 @@ function openRoundModal(unitId){
     <label>Notes</label>
     <textarea id="rNotes" style="min-height:60px;" placeholder="Anything worth noting about this round…"></textarea>
     <div class="divider"></div>
+    <label>Is the current trade on time / clean / safety forms filled out?</label>
+    <textarea id="rTradeCompliance" style="min-height:50px;"></textarea>
+    <label>If they finished today or yesterday, did they clean up?</label>
+    <textarea id="rCleanup" style="min-height:50px;"></textarea>
+    <label>What could go wrong for the next trade?</label>
+    <textarea id="rNextTradeRisk" style="min-height:50px;"></textarea>
+    <label>What could go wrong in the next 14 days?</label>
+    <textarea id="rNext14Risk" style="min-height:50px;"></textarea>
+    <label>What do I need to line up in the next 1-3 months?</label>
+    <textarea id="rNext90Prep" style="min-height:50px;"></textarea>
+    <div class="divider"></div>
     <button class="btn" id="rSave" style="width:100%;">Save Round</button>
   `);
   document.getElementById('rSave').onclick = async()=>{
@@ -1012,7 +1028,12 @@ function openRoundModal(unitId){
     state.roundHistory.push({
       id:uid(), unitId:u.id, unitName:u.name, date:todayISO(),
       currentPhase:u.currentPhase, crntTrade:u.crntTrade, ctEnd:u.ctEnd,
-      nextTrade:u.nextTrade, risk:computeRisk(u), notes:document.getElementById('rNotes').value.trim()
+      nextTrade:u.nextTrade, risk:computeRisk(u), notes:document.getElementById('rNotes').value.trim(),
+      tradeCompliance:document.getElementById('rTradeCompliance').value.trim(),
+      cleanup:document.getElementById('rCleanup').value.trim(),
+      nextTradeRisk:document.getElementById('rNextTradeRisk').value.trim(),
+      next14Risk:document.getElementById('rNext14Risk').value.trim(),
+      next90Prep:document.getElementById('rNext90Prep').value.trim()
     });
     await sset('roundHistory', state.roundHistory);
     closeModal();
