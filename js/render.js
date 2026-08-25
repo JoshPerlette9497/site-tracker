@@ -755,11 +755,18 @@ function renderPhaseGroupRow(row, highlight){
         lastSub = it.subgroup;
       }
       const checked = !!gi.itemStatus[it.id];
-      html += `<label style="display:flex; align-items:center; gap:8px; padding:5px 0; border-top:1px solid var(--line); font-size:13px;">
-        <input type="checkbox" class="pcg-item" data-giid="${gi.id}" data-itemid="${it.id}" ${checked?'checked':''} style="width:18px; height:18px; margin:0;">
-        <span style="${checked?'text-decoration:line-through; opacity:0.55;':''}">${escapeHtml(it.text)}</span>
-      </label>`;
+      html += `<div style="display:flex; align-items:center; gap:4px; padding:5px 0; border-top:1px solid var(--line);">
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; flex:1; cursor:pointer;">
+          <input type="checkbox" class="pcg-item" data-giid="${gi.id}" data-itemid="${it.id}" ${checked?'checked':''} style="width:18px; height:18px; margin:0; flex-shrink:0;">
+          <span style="${checked?'text-decoration:line-through; opacity:0.55;':''}">${escapeHtml(it.text)}</span>
+        </label>
+        <button class="pcg-item-remove" data-groupid="${g.id}" data-itemid="${it.id}" title="Remove item" style="background:none; border:none; color:var(--ink-dim); font-size:18px; line-height:1; padding:2px 6px; cursor:pointer; flex-shrink:0;">×</button>
+      </div>`;
     }
+    html += `<div class="row" style="margin-top:8px; gap:6px;">
+      <input type="text" class="pcg-additem-input" data-groupid="${g.id}" placeholder="Add item…" style="margin-top:0; flex:1;">
+      <button class="btn small ghost pcg-additem-btn" data-groupid="${g.id}">Add</button>
+    </div>`;
     html += `</div>`;
   }
   html += `</div>`;
@@ -930,6 +937,42 @@ function openUnitDetail(unitId){
     gi.itemStatus[itemid] = el.checked;
     await sset('groupInstances', state.groupInstances);
     openUnitDetail(unitId);
+  });
+  document.querySelectorAll('.pcg-item-remove').forEach(btn=>btn.onclick=(e)=>{
+    e.stopPropagation();
+    const groupId = btn.dataset.groupid, itemId = btn.dataset.itemid;
+    const g = state.checklistGroups.find(x=>x.id===groupId);
+    if(!g) return;
+    const item = g.items.find(it=>it.id===itemId);
+    showConfirm(`Remove "${item?item.text:'this item'}" from ${g.name}? This removes it from this checklist everywhere it's used, not just this unit.`, async()=>{
+      g.items = g.items.filter(it=>it.id!==itemId);
+      await sset('checklistGroups', state.checklistGroups);
+      showToast('Item removed.');
+      openUnitDetail(unitId);
+    });
+  });
+  document.querySelectorAll('.pcg-additem-btn').forEach(btn=>{
+    const addItem = async()=>{
+      const groupId = btn.dataset.groupid;
+      const input = document.querySelector(`.pcg-additem-input[data-groupid="${groupId}"]`);
+      const text = input.value.trim();
+      if(!text) return;
+      const g = state.checklistGroups.find(x=>x.id===groupId);
+      if(!g) return;
+      g.items.push({id:uid(), text});
+      await sset('checklistGroups', state.checklistGroups);
+      showToast('Item added.');
+      openUnitDetail(unitId);
+    };
+    btn.onclick = (e)=>{ e.stopPropagation(); addItem(); };
+  });
+  document.querySelectorAll('.pcg-additem-input').forEach(input=>{
+    input.onclick = (e)=>e.stopPropagation();
+    input.onkeydown = (e)=>{
+      if(e.key!=='Enter') return;
+      e.stopPropagation();
+      document.querySelector(`.pcg-additem-btn[data-groupid="${input.dataset.groupid}"]`).click();
+    };
   });
   document.getElementById('udAddDefBtn').onclick = ()=>{
     closeModal();
