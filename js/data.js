@@ -497,6 +497,20 @@ function groupDueDate(unitId, group){
   const finish = matches.map(m=>m.finishDate).sort()[0];
   return addDays(finish, -group.offsetDays);
 }
+/* Trade/assignee names pulled from the parenthetical suffix on each phase
+   checklist group's name (e.g. "#23 — Strip Walls (TM Formworks)" ->
+   "TM Formworks"), so Current Trade / Next Trade in Log Round can suggest
+   from the same real list of trades/people already on the checklist,
+   instead of a separately hand-maintained one. */
+function tradeOptions(){
+  const set = new Set();
+  for(const g of state.checklistGroups){
+    const m = g.name.match(/\(([^()]*)\)\s*$/);
+    if(m && m[1] && m[1].trim() && m[1].trim()!=='—') set.add(m[1].trim());
+  }
+  return [...set].sort((a,b)=>a.localeCompare(b));
+}
+
 /* Finds the checklist group whose matchPhase corresponds to a unit's
    currently-selected phase (Log Round's Current Phase dropdown, itself
    pulled from real schedule subjects — see scheduleSubjectOptions above),

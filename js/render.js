@@ -1046,10 +1046,11 @@ function openRoundModal(unitId){
     <select id="rPhase"><option value="">—</option>${phaseOpts}</select>
     ${phaseOpts?'':'<div class="helptext" style="margin-top:2px;">No schedule synced yet — import one on the Sync tab to populate this list.</div>'}
     <div class="field-row">
-      <div><label>Current Trade</label><input id="rCrntTrade" value="${escapeHtml(u.crntTrade||'')}"></div>
+      <div><label>Current Trade</label><input id="rCrntTrade" list="tradeSuggestions" value="${escapeHtml(u.crntTrade||'')}"></div>
       <div><label>Trade End Date</label><input id="rCtEnd" type="date" value="${u.ctEnd||''}"></div>
     </div>
-    <label>Next Trade</label><input id="rNextTrade" value="${escapeHtml(u.nextTrade||'')}">
+    <label>Next Trade</label><input id="rNextTrade" list="tradeSuggestions" value="${escapeHtml(u.nextTrade||'')}">
+    <datalist id="tradeSuggestions">${tradeOptions().map(t=>`<option value="${escapeHtml(t)}">`).join('')}</datalist>
     <label>Risk Override (leave on Auto unless you need to force it)</label>
     <select id="rRiskOverride">
       <option value="" ${!u.riskOverride?'selected':''}>Auto</option>
