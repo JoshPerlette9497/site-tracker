@@ -736,11 +736,11 @@ function renderPhaseGroupRow(row, highlight){
   const isOpen = expandedGroupIds.has(gi.id);
   let html = `<div class="card ${st}${highlight?' week-urgent':''}">
     <div class="row pcg-toggle" data-giid="${gi.id}" style="cursor:pointer;">
-      <div>
+      <div style="min-width:0; flex:1;">
         <div class="item-name">${escapeHtml(g.name)}</div>
         <div class="item-meta">${due?'due '+fmtDate(due):'no schedule match'} · ${done}/${total} done</div>
       </div>
-      <div style="display:flex; align-items:center; gap:8px;">
+      <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
         ${highlight?'<span class="stamp week-urgent">This Week</span>':''}
         <span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':st==='done'?'Done':'Open'}</span>
         <span style="font-size:16px;">${isOpen?'▾':'▸'}</span>
@@ -791,7 +791,6 @@ function openUnitDetail(unitId){
   html += `<div class="card">
     <div class="row"><div class="item-meta">Risk</div><div>${risk}${u.riskOverride?' (manual override)':' (auto)'}</div></div>
     <div class="row" style="margin-top:6px;"><div class="item-meta">Current Phase</div><div style="font-size:13px; text-align:right;">${escapeHtml(u.currentPhase||'—')}</div></div>
-    <div class="row" style="margin-top:6px;"><div class="item-meta">Current Trade</div><div style="font-size:13px;">${escapeHtml(u.crntTrade||'—')}</div></div>
     <div class="row" style="margin-top:6px;"><div class="item-meta">Trade End</div><div style="font-size:13px;">${fmtDate(u.ctEnd)}</div></div>
     <div class="row" style="margin-top:6px;"><div class="item-meta">Next Trade</div><div style="font-size:13px;">${escapeHtml(u.nextTrade||'—')}</div></div>
     <div class="row" style="margin-top:6px;"><div class="item-meta">Last Walk</div>
@@ -811,7 +810,7 @@ function openUnitDetail(unitId){
       html += `<div class="card">
         <div class="item-meta" style="font-weight:700;">${fmtDate(r.date)} — ${r.risk}</div>
         <div class="item-meta" style="margin-top:4px;">${escapeHtml(r.currentPhase||'—')}</div>
-        <div class="item-meta">Trade: ${escapeHtml(r.crntTrade||'—')}${r.ctEnd?' (ends '+fmtDate(r.ctEnd)+')':''} · Next: ${escapeHtml(r.nextTrade||'—')}</div>
+        <div class="item-meta">${r.ctEnd?'Trade ends '+fmtDate(r.ctEnd)+' · ':''}Next: ${escapeHtml(r.nextTrade||'—')}</div>
         ${r.notes?`<div style="font-size:13px; margin-top:6px;">${escapeHtml(r.notes)}</div>`:''}
         ${r.tradeCompliance?`<div style="font-size:13px; margin-top:6px;"><b>On time/clean/safety:</b> ${escapeHtml(r.tradeCompliance)}</div>`:''}
         ${r.cleanup?`<div style="font-size:13px; margin-top:4px;"><b>Cleanup:</b> ${escapeHtml(r.cleanup)}</div>`:''}
@@ -1039,18 +1038,16 @@ function openEditWalkModal(unitId){
 function openRoundModal(unitId){
   const u = state.units.find(x=>x.id===unitId);
   const phaseOpts = scheduleSubjectOptions(u.currentPhase).map(p=>`<option value="${escapeHtml(p)}" ${u.currentPhase===p?'selected':''}>${escapeHtml(p)}</option>`).join('');
+  const nextTradeOpts = scheduleSubjectOptions(u.nextTrade).map(p=>`<option value="${escapeHtml(p)}" ${u.nextTrade===p?'selected':''}>${escapeHtml(p)}</option>`).join('');
   showModal(`
     <h2>Log Round — ${escapeHtml(u.name)}</h2>
     <div class="helptext" style="margin-bottom:6px;">Sets Last Walk Date to today and saves whatever you update below.</div>
     <label>Current Phase</label>
     <select id="rPhase"><option value="">—</option>${phaseOpts}</select>
     ${phaseOpts?'':'<div class="helptext" style="margin-top:2px;">No schedule synced yet — import one on the Sync tab to populate this list.</div>'}
-    <div class="field-row">
-      <div><label>Current Trade</label><input id="rCrntTrade" list="tradeSuggestions" value="${escapeHtml(u.crntTrade||'')}"></div>
-      <div><label>Trade End Date</label><input id="rCtEnd" type="date" value="${u.ctEnd||''}"></div>
-    </div>
-    <label>Next Trade</label><input id="rNextTrade" list="tradeSuggestions" value="${escapeHtml(u.nextTrade||'')}">
-    <datalist id="tradeSuggestions">${tradeOptions().map(t=>`<option value="${escapeHtml(t)}">`).join('')}</datalist>
+    <label>Trade End Date</label><input id="rCtEnd" type="date" value="${u.ctEnd||''}">
+    <label>Next Trade</label>
+    <select id="rNextTrade"><option value="">—</option>${nextTradeOpts}</select>
     <label>Risk Override (leave on Auto unless you need to force it)</label>
     <select id="rRiskOverride">
       <option value="" ${!u.riskOverride?'selected':''}>Auto</option>
@@ -1076,9 +1073,9 @@ function openRoundModal(unitId){
   `);
   document.getElementById('rSave').onclick = async()=>{
     u.currentPhase = document.getElementById('rPhase').value;
-    u.crntTrade = document.getElementById('rCrntTrade').value.trim();
+    u.crntTrade = u.currentPhase;
     u.ctEnd = document.getElementById('rCtEnd').value || null;
-    u.nextTrade = document.getElementById('rNextTrade').value.trim();
+    u.nextTrade = document.getElementById('rNextTrade').value;
     u.riskOverride = document.getElementById('rRiskOverride').value || null;
     u.lastWalkDate = todayISO();
     await sset('units', state.units);
@@ -1137,11 +1134,11 @@ function renderActiveChecklistsSection(){
     for(const r of shown){
       html += `<div class="card ${r.st} active-checklist-row" data-unitid="${r.u.id}" style="cursor:pointer;">
         <div class="row">
-          <div>
+          <div style="min-width:0; flex:1;">
             <div class="item-name">${escapeHtml(r.g.name)}</div>
             <div class="item-meta">${escapeHtml(r.u.name)} · ${r.done}/${r.total} done${r.due?' · due '+fmtDate(r.due):''}</div>
           </div>
-          <span class="stamp ${r.st}">${r.st==='overdue'?'Overdue':r.st==='today'?'Today':'Open'}</span>
+          <span class="stamp ${r.st}" style="flex-shrink:0;">${r.st==='overdue'?'Overdue':r.st==='today'?'Today':'Open'}</span>
         </div>
       </div>`;
     }
