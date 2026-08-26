@@ -1026,12 +1026,13 @@ function openEditWalkModal(unitId){
 
 function openRoundModal(unitId){
   const u = state.units.find(x=>x.id===unitId);
-  const phaseOpts = CURRENT_PHASE_OPTIONS.map(p=>`<option value="${escapeHtml(p)}" ${u.currentPhase===p?'selected':''}>${escapeHtml(p)}</option>`).join('');
+  const phaseOpts = scheduleSubjectOptions(u.currentPhase).map(p=>`<option value="${escapeHtml(p)}" ${u.currentPhase===p?'selected':''}>${escapeHtml(p)}</option>`).join('');
   showModal(`
     <h2>Log Round — ${escapeHtml(u.name)}</h2>
     <div class="helptext" style="margin-bottom:6px;">Sets Last Walk Date to today and saves whatever you update below.</div>
     <label>Current Phase</label>
     <select id="rPhase"><option value="">—</option>${phaseOpts}</select>
+    ${phaseOpts?'':'<div class="helptext" style="margin-top:2px;">No schedule synced yet — import one on the Sync tab to populate this list.</div>'}
     <div class="field-row">
       <div><label>Current Trade</label><input id="rCrntTrade" value="${escapeHtml(u.crntTrade||'')}"></div>
       <div><label>Trade End Date</label><input id="rCtEnd" type="date" value="${u.ctEnd||''}"></div>

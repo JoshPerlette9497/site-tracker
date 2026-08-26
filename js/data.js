@@ -10,7 +10,17 @@ const DEFAULT_UNITS = [
   {id:uid(), name:'Juniper B20', project:'Juniper', active:true, btLocation:'Juniper B20', currentPhase:'', crntTrade:'', ctEnd:null, nextTrade:'', lastWalkDate:null, riskOverride:null},
 ];
 
-const CURRENT_PHASE_OPTIONS = ['Pre-Cribbing','Pre-Excavation','Pre-Undergrounds','Pre-Backfill','Pre-Framing','FRAME CHECK: Pre-IPD','FRAME CHECK: Exterior','FRAME CHECK: ALL Rooms','FRAME CHECK: Garage','FRAME CHECK: Powder Room/Bathrooms','FRAME CHECK: Kitchen','FRAME CHECK: Laundry','FRAME CHECK: Stairs','FRAME CHECK: Living Room/Bedrooms','FRAME CHECK: Mechanical Room','FRAME CHECK: Decks/Porches',"FRAME CHECK: Post-Rough-In's Backframing",'Pre-Rough-ins','Pre-HVAC rough-in','Spray Paint','Pre-rough city inspections','Pre-Insulation and Drywall','Pre-Boarding','Pre-Taping','Pre-S1','Pre-OTR','Pre-Flooring','Pre-S2 Carpentry','Pre-Trade Finals','Pre-Final Inspection and Appliances','Con Walk and Pre-Occupancy: Con Walk','Con Walk and Pre-Occupancy: Stress Tests','Con Walk and Pre-Occupancy: Exterior Pre-Occ','Possession'];
+/* Current Phase options for Log Round come from the actual synced schedule
+   data (state.schedule[].subject) instead of a separate hardcoded list, so
+   they can't drift out of sync with what Buildertrend/Outlook actually says.
+   extraValue keeps a unit's already-set phase in the list even if it no
+   longer appears in the schedule, so it doesn't silently disappear. */
+function scheduleSubjectOptions(extraValue){
+  const set = new Set();
+  for(const s of state.schedule){ if(s.subject) set.add(s.subject.trim()); }
+  if(extraValue) set.add(extraValue.trim());
+  return [...set].filter(Boolean).sort((a,b)=>a.localeCompare(b));
+}
 
 function businessDaysBetween(fromISO, toISO){
   const d = new Date(fromISO);
