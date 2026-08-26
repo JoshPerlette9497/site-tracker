@@ -255,6 +255,7 @@ let expandedGroupIds = new Set();
 let expandedPhaseOverflow = new Set();
 let expandedUnitDefs = new Set();
 let defsFilterTab = 'dated';
+let checklistsFilterTab = 'due';
 let logSearchQuery = null;
 let safetyWalkthroughOpen = false;
 let defSearchQuery = '';

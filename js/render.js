@@ -1099,8 +1099,59 @@ function openRoundModal(unitId){
   };
 }
 
+/* Cross-unit view of every phase-checklist group that isn't fully checked
+   off yet, mirroring how the Deficiencies tab shows all open deficiencies
+   from every unit in one place instead of having to open each unit to see
+   what's outstanding there. With 145 groups per unit, "not yet complete"
+   alone would be an overwhelming flat list, so it's split the same way
+   Deficiencies splits Due Date/No Date/Done - here Due Date / In Progress
+   (started but no computed due date) / Not Started - defaulting to Due Date. */
+function renderActiveChecklistsSection(){
+  const activeUnitIds = new Set(state.units.filter(u=>u.active).map(u=>u.id));
+  const rows = state.groupInstances.filter(gi=>activeUnitIds.has(gi.unitId)).map(gi=>{
+    const g = state.checklistGroups.find(x=>x.id===gi.groupId);
+    const u = state.units.find(x=>x.id===gi.unitId);
+    if(!g || !u) return null;
+    const due = gi.dueOverride || groupDueDate(gi.unitId, g);
+    const {done,total} = groupCompletion(gi, g);
+    if(done>=total) return null;
+    const st = groupStatus(due, done, total);
+    return {gi, g, u, due, done, total, st};
+  }).filter(Boolean);
+
+  const dueRows = rows.filter(r=>r.due).sort((a,b)=>a.due.localeCompare(b.due));
+  const progressRows = rows.filter(r=>!r.due && r.done>0);
+  const notStartedRows = rows.filter(r=>!r.due && r.done===0);
+  if(!['due','progress','notstarted'].includes(checklistsFilterTab)) checklistsFilterTab = 'due';
+  const shown = checklistsFilterTab==='due' ? dueRows : checklistsFilterTab==='progress' ? progressRows : notStartedRows;
+
+  let html = `<div class="section-title">Active Checklists<span class="pill">${rows.length}</span></div>`;
+  html += `<div style="display:flex; gap:6px; margin:0 4px 14px;">
+    <button class="btn small checklists-filter-pick ${checklistsFilterTab==='due'?'':'ghost'}" data-filter="due" style="flex:1;">Due Date <span class="pill">${dueRows.length}</span></button>
+    <button class="btn small checklists-filter-pick ${checklistsFilterTab==='progress'?'':'ghost'}" data-filter="progress" style="flex:1;">In Progress <span class="pill">${progressRows.length}</span></button>
+    <button class="btn small checklists-filter-pick ${checklistsFilterTab==='notstarted'?'':'ghost'}" data-filter="notstarted" style="flex:1;">Not Started <span class="pill">${notStartedRows.length}</span></button>
+  </div>`;
+  if(shown.length===0){
+    html += `<div class="empty">Nothing here.</div>`;
+  } else {
+    for(const r of shown){
+      html += `<div class="card ${r.st} active-checklist-row" data-unitid="${r.u.id}" style="cursor:pointer;">
+        <div class="row">
+          <div>
+            <div class="item-name">${escapeHtml(r.g.name)}</div>
+            <div class="item-meta">${escapeHtml(r.u.name)} · ${r.done}/${r.total} done${r.due?' · due '+fmtDate(r.due):''}</div>
+          </div>
+          <span class="stamp ${r.st}">${r.st==='overdue'?'Overdue':r.st==='today'?'Today':'Open'}</span>
+        </div>
+      </div>`;
+    }
+  }
+  return html;
+}
+
 function renderMaster(){
-  let html = `<div class="section-title">Checklist Master<button class="btn small" id="addMasterBtn">+ Add Item</button></div>
+  let html = renderActiveChecklistsSection();
+  html += `<div class="section-title" style="margin-top:14px;">Checklist Master<button class="btn small" id="addMasterBtn">+ Add Item</button></div>
   <div class="helptext" style="margin:0 4px 12px;">New items apply to every active unit immediately.</div>`;
   for(const m of state.master){
     html += `<div class="card" data-master="${m.id}">
@@ -1114,6 +1165,12 @@ function renderMaster(){
     </div>`;
   }
   app.innerHTML = html;
+  document.querySelectorAll('.checklists-filter-pick').forEach(b=>b.onclick=()=>{
+    checklistsFilterTab = b.dataset.filter; render();
+  });
+  document.querySelectorAll('.active-checklist-row').forEach(card=>card.onclick=()=>{
+    openUnitDetail(card.dataset.unitid);
+  });
   document.getElementById('addMasterBtn').onclick = ()=>openMasterModal();
   document.querySelectorAll('.master-del').forEach(b=>b.onclick=async(e)=>{
     const id = e.target.closest('[data-master]').dataset.master;
