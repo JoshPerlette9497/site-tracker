@@ -846,9 +846,8 @@ function openUnitDetail(unitId){
     }
   }
 
-  html += `<div class="section-title">Phase Checklist</div>`;
   const groupInsts = state.groupInstances.filter(gi=>gi.unitId===unitId);
-  const groupRows = groupInsts.map(gi=>{
+  let groupRows = groupInsts.map(gi=>{
     const g = state.checklistGroups.find(x=>x.id===gi.groupId);
     if(!g) return null;
     const due = gi.dueOverride || groupDueDate(unitId, g);
@@ -856,6 +855,19 @@ function openUnitDetail(unitId){
     const st = groupStatus(due, done, total);
     return {gi, g, due, done, total, st};
   }).filter(Boolean).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
+
+  // Surface whichever checklist matches the unit's current phase (set in Log
+  // Round) front and center, since with a large checklist library it can
+  // otherwise take a lot of scrolling/expanding to find the relevant one.
+  const currentPhaseGroup = currentPhaseChecklistGroup(u);
+  const currentPhaseRow = currentPhaseGroup ? groupRows.find(r=>r.g.id===currentPhaseGroup.id) : null;
+  if(currentPhaseRow){
+    groupRows = groupRows.filter(r=>r.gi.id!==currentPhaseRow.gi.id);
+    html += `<div class="section-title">Current Phase Checklist</div>`;
+    html += renderPhaseGroupRow(currentPhaseRow, false);
+  }
+
+  html += `<div class="section-title">Phase Checklist</div>`;
 
   // Highlight the 1-2 phases due this week (Mon-Sun) so they stand out;
   // everything else — past or future — sits in the collapsed dropdown below.
@@ -1708,7 +1720,7 @@ async function doRestore(){
       if(!data.units || !data.master) throw new Error('File does not look like a Site Log backup.');
       state.units = data.units; state.master = data.master; state.instances = data.instances||[];
       state.defs = data.defs||[]; state.schedule = data.schedule||[];
-      state.checklistGroups = data.checklistGroups || CHECKLIST_GROUPS_SEED.slice();
+      state.checklistGroups = data.checklistGroups || PHASE_CHECKLIST_SEED.slice();
       state.groupInstances = data.groupInstances || [];
       state.roundHistory = data.roundHistory || [];
       state.logHistory = data.logHistory || LOG_HISTORY_SEED.slice();
