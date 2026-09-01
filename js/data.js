@@ -234,7 +234,7 @@ const PHASE_CHECKLIST_SEED = [
 {id:uid(),name:"#140 — Correct Deficiencies (Finishing Supervisor/Scott)",milestone:"Finishing",num:"140",category:"BK",offsetDays:0,matchPhase:"Correct Deficiencies",items:[{id:uid(),text:"Holding schedule. 48 hour due date",subgroup:'Blocker'}]},
 {id:uid(),name:"#141 — Owner Tag touch up (Super Sam Painting)",milestone:"Finishing",num:"141",category:"BK",offsetDays:0,matchPhase:"Owner Tag touch up",items:[{id:uid(),text:"Holding schedule. 48 hour due date",subgroup:'Blocker'}]},
 {id:uid(),name:"#142 — Possession Clean (Pierrefect Cleaning)",milestone:"Finishing",num:"142",category:null,offsetDays:0,matchPhase:"Possession Clean",items:[{id:uid(),text:"None",subgroup:'Blocker'}]},
-{id:uid(),name:"#143 — Possession (Stacie)",milestone:"Finishing",num:"143",category:"SEQ",offsetDays:0,matchPhase:"Possession",items:[{id:uid(),text:"All previous touch ups and fixes complete",subgroup:'Blocker'},{id:uid(),text:"Cleaners done",subgroup:"QC — Possession"},{id:uid(),text:"Humidifier plugged in and ON",subgroup:"QC — Possession"},{id:uid(),text:"Check all sinks appliances WATER ON",subgroup:"QC — Possession"},{id:uid(),text:"Doors rekey",subgroup:"QC — Possession"},{id:uid(),text:"Cabinets organized",subgroup:"QC — Possession"},{id:uid(),text:"Appliance clocks",subgroup:"QC — Possession"}]},
+{id:uid(),name:"#143 — Possession (Stacie)",milestone:"Finishing",num:"143",category:"SEQ",offsetDays:0,matchPhase:"Possession",exactMatch:true,items:[{id:uid(),text:"All previous touch ups and fixes complete",subgroup:'Blocker'},{id:uid(),text:"Cleaners done",subgroup:"QC — Possession"},{id:uid(),text:"Humidifier plugged in and ON",subgroup:"QC — Possession"},{id:uid(),text:"Check all sinks appliances WATER ON",subgroup:"QC — Possession"},{id:uid(),text:"Doors rekey",subgroup:"QC — Possession"},{id:uid(),text:"Cabinets organized",subgroup:"QC — Possession"},{id:uid(),text:"Appliance clocks",subgroup:"QC — Possession"}]},
 {id:uid(),name:"#144 — Release Holdback (Whole Building) (Stephanie Shepherd)",milestone:"Finishing",num:"144",category:null,offsetDays:0,matchPhase:"Release Holdback",items:[{id:uid(),text:"None",subgroup:'Blocker'}]},
 ];
 PHASE_CHECKLIST_SEED.forEach(g => { g.estimatedMinutes = 15; });
@@ -313,6 +313,7 @@ async function loadAll(){
   await migrateChecklistMatchPhases();
   await migrateSafetyWalkthroughShape();
   await migratePhaseChecklistRewrite_v1();
+  await migratePossessionExactMatch_v1();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -478,6 +479,21 @@ async function migratePhaseChecklistRewrite_v1(){
   await sset('checklistGroups', state.checklistGroups);
   await sset('groupInstances', state.groupInstances);
   await sset('migrated_phase_checklist_v1', true);
+}
+
+/* "Possession" is a common enough substring that it also matches other
+   schedule items (e.g. a "Pre-Possession Walkthrough" entry), and since
+   groupDueDate() takes the EARLIEST matching finish date across all matches,
+   an unrelated earlier-dated entry can make #143's checklist look overdue
+   well before the unit has actually reached possession. Switches it to an
+   exact subject match, same fix already used for this exact word in the old
+   checklist system. */
+async function migratePossessionExactMatch_v1(){
+  const done = await sget('migrated_possession_exact_match_v1', false);
+  if(done) return;
+  const g = state.checklistGroups.find(x=>x.num==='143');
+  if(g && !g.exactMatch){ g.exactMatch = true; await sset('checklistGroups', state.checklistGroups); }
+  await sset('migrated_possession_exact_match_v1', true);
 }
 
 function makeGroupInstance(unitId, groupId){
