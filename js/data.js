@@ -277,9 +277,9 @@ const LOG_HISTORY_SEED = [
 
 async function loadAll(){
   // Daily physical-task time budget, in minutes, for Josh-owned deficiencies only.
-  // Trade-owned deficiencies don't count against it — those are rounds/follow-up
-  // checks on work the trades do, not tasks Josh personally has to complete.
-  state.dailyAllowanceMinutes = await sget('dailyAllowanceMinutes', 180);
+  // Trade-owned deficiencies and phase checks don't count against it — those
+  // aren't blocks of Josh's personal time the way his own deficiencies are.
+  state.dailyAllowanceMinutes = await sget('dailyAllowanceMinutes', 240);
   state.units = await sget('units', DEFAULT_UNITS);
   state.master = await sget('master', DEFAULT_MASTER);
   state.instances = await sget('instances', null);
@@ -531,7 +531,7 @@ const PLAN_DEFAULT_ESTIMATE = 30;
    budget — they're rounds follow-ups, not Josh's own task time. */
 function buildSuggestedPlan(){
   const today = todayISO();
-  const budget = state.dailyAllowanceMinutes || 180;
+  const budget = state.dailyAllowanceMinutes || 240;
 
   const defCandidates = state.defs
     .filter(d=>d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=today && isUnitActiveByLocation(d.location))
@@ -539,9 +539,17 @@ function buildSuggestedPlan(){
       type:'def', due:d.dueDate, priority:d.priority||'Medium', category:d.category||'Construction',
       minutes: d.estimatedMinutes || PLAN_DEFAULT_ESTIMATE,
       ref:d
-    }));
+    }))
+    .sort((a,b)=>
+      (a.due||'').localeCompare(b.due||'')
+      || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
+      || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
+    );
 
-  const phaseCandidates = [];
+  // Phase checks are never time-budgeted or deferrable — only Josh's own
+  // deficiencies compete for his daily allowance, since a phase check isn't a
+  // block of Josh's personal time the way his own deficiency is.
+  const phaseToday = [];
   for(const u of state.units){
     if(!u.active) continue;
     for(const gi of state.groupInstances.filter(x=>x.unitId===u.id)){
@@ -551,30 +559,22 @@ function buildSuggestedPlan(){
       if(!due || due>today) continue;
       const {done,total} = groupCompletion(gi, g);
       if(done>=total) continue;
-      phaseCandidates.push({
-        type:'phase', due, priority:'Medium', category:'Construction',
-        minutes: g.estimatedMinutes || PLAN_DEFAULT_ESTIMATE,
-        unit:u, group:g, groupInstance:gi
-      });
+      phaseToday.push({type:'phase', due, unit:u, group:g, groupInstance:gi});
     }
   }
 
-  const all = [...defCandidates, ...phaseCandidates].sort((a,b)=>
-    (a.due||'').localeCompare(b.due||'')
-    || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
-    || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
-  );
-
-  const selected = [], deferred = [];
+  const selectedDefs = [], deferred = [];
   let used = 0;
-  for(const item of all){
-    if(selected.length===0 || used+item.minutes<=budget){
-      selected.push(item);
+  for(const item of defCandidates){
+    if(selectedDefs.length===0 || used+item.minutes<=budget){
+      selectedDefs.push(item);
       used += item.minutes;
     } else {
       deferred.push(item);
     }
   }
+
+  const selected = [...selectedDefs, ...phaseToday].sort((a,b)=>(a.due||'').localeCompare(b.due||''));
 
   // Trade-owned deficiencies due today: never budgeted or ranked against Josh's
   // own time, but still worth surfacing so today's rounds/follow-ups are visible.

@@ -447,7 +447,7 @@ function planPhaseCard(item){
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(item.group.name)}</div>
-        <div class="item-meta">${escapeHtml(item.unit.name)} · Phase Check · due ${fmtDate(item.due)} · ${item.minutes}m</div>
+        <div class="item-meta">${escapeHtml(item.unit.name)} · Phase Check · due ${fmtDate(item.due)}</div>
       </div>
       <span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>
