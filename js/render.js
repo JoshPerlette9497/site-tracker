@@ -17,6 +17,7 @@ function render(){
   else if(activeTab==='log') renderLog();
   else if(activeTab==='schedule') renderSchedule();
   else if(activeTab==='sync') renderSync();
+  else if(activeTab==='subs') renderSubs();
   window.scrollTo(0, scrollY);
 }
 
@@ -1741,6 +1742,98 @@ function renderSync(){
       location.reload();
     });
   };
+}
+
+/* ---------- subcontractor sign-in / safety submissions (read-only view) ----------
+   Reads the subcontractors / site_visits / safety_documents tables written
+   by the standalone /sub/ app. Those tables use open Supabase RLS policies
+   (no x-site-key), so plain GETs with the anon key are enough here. */
+const SUB_DOC_TYPES = {
+  hazard_assessment: 'Hazard Assessment',
+  equipment_cert: 'Equipment Operation Certificate',
+  incident_report: 'Incident Report'
+};
+
+async function renderSubs(){
+  html = `<div class="section-title">Subcontractor Sign-In</div>
+  <div class="card">
+    <div class="helptext" style="margin-bottom:10px;">Subcontractors sign in/out and submit hazard assessments, equipment certificates, and incident reports from their own phone via QR code — no login for them, just a one-time profile the first time.</div>
+    <div class="row" style="gap:8px;">
+      <a class="btn ghost" href="sub/index.html" target="_blank" style="flex:1; text-align:center; text-decoration:none;">Open Sign-In Page</a>
+      <a class="btn ghost" href="sub/qr.html" target="_blank" style="flex:1; text-align:center; text-decoration:none;">Print QR Code</a>
+    </div>
+  </div>
+  <div class="section-title">On Site Now</div>
+  <div id="subsOnSite"><div class="helptext" style="margin:4px;">Loading…</div></div>
+  <div class="section-title">Recent Activity</div>
+  <div id="subsActivity"><div class="helptext" style="margin:4px;">Loading…</div></div>`;
+  app.innerHTML = html;
+
+  try{
+    const [visits, docs] = await Promise.all([fetchSubVisits(), fetchSubDocs()]);
+    renderSubsOnSite(visits);
+    renderSubsActivity(visits, docs);
+  }catch(e){
+    console.error('subs load failed', e);
+    document.getElementById('subsOnSite').innerHTML = `<div class="helptext">Couldn't load — check your connection.</div>`;
+    document.getElementById('subsActivity').innerHTML = '';
+  }
+}
+
+async function fetchSubVisits(){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/site_visits?order=sign_in_at.desc&limit=100&select=*`, {
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+  });
+  if(!res.ok) throw new Error('site_visits fetch failed: ' + res.status);
+  return res.json();
+}
+async function fetchSubDocs(){
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/safety_documents?order=uploaded_at.desc&limit=50&select=*`, {
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+  });
+  if(!res.ok) throw new Error('safety_documents fetch failed: ' + res.status);
+  return res.json();
+}
+
+function renderSubsOnSite(visits){
+  const onSite = visits.filter(v=>!v.sign_out_at);
+  const el = document.getElementById('subsOnSite');
+  if(!onSite.length){ el.innerHTML = `<div class="empty">Nobody currently signed in.</div>`; return; }
+  el.innerHTML = onSite.map(v=>`
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="item-name">${escapeHtml(v.subcontractor_name || 'Unknown')}</div>
+          <div class="item-meta">${escapeHtml(v.subcontractor_company || '')}</div>
+        </div>
+        <div class="stamp open">Signed in ${new Date(v.sign_in_at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderSubsActivity(visits, docs){
+  const items = [
+    ...visits.map(v=>({ ts: v.sign_in_at, name: v.subcontractor_name, company: v.subcontractor_company, label: 'Signed in' })),
+    ...visits.filter(v=>v.sign_out_at).map(v=>({ ts: v.sign_out_at, name: v.subcontractor_name, company: v.subcontractor_company, label: 'Signed out' })),
+    ...docs.map(d=>({ ts: d.uploaded_at, name: d.subcontractor_name, company: d.subcontractor_company, label: `Submitted: ${SUB_DOC_TYPES[d.type] || d.type}`, url: d.file_url, notes: d.notes }))
+  ].sort((a,b)=> new Date(b.ts) - new Date(a.ts)).slice(0, 60);
+
+  const el = document.getElementById('subsActivity');
+  if(!items.length){ el.innerHTML = `<div class="empty">No sign-ins or submissions yet.</div>`; return; }
+  el.innerHTML = items.map(it=>`
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="item-name">${escapeHtml(it.name || 'Unknown')}</div>
+          <div class="item-meta">${escapeHtml(it.company || '')} · ${it.label}</div>
+          ${it.notes ? `<div class="item-meta">${escapeHtml(it.notes)}</div>` : ''}
+        </div>
+        <div class="item-meta" style="text-align:right; white-space:nowrap;">${new Date(it.ts).toLocaleString('en-US',{month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}</div>
+      </div>
+      ${it.url ? `<div class="divider" style="margin:8px 0;"></div><a href="${escapeHtml(it.url)}" target="_blank">View submitted file</a>` : ''}
+    </div>
+  `).join('');
 }
 
 async function doBackup(){

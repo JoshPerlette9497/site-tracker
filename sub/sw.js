@@ -1,7 +1,7 @@
-const CACHE_NAME = 'sitelog-v20';
+const CACHE_NAME = 'subsignin-v1';
 const APP_SHELL = [
-  './index.html', './manifest.json', './icon-192.png', './icon-512.png', './style.css',
-  './js/storage.js', './js/dialogs.js', './js/modal.js', './js/data.js', './js/render.js', './js/app.js'
+  './index.html', './manifest.json', './style.css',
+  './js/modal.js', './js/storage.js', './js/app.js'
 ];
 
 self.addEventListener('install', (event) => {
