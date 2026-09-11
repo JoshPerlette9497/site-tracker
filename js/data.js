@@ -279,7 +279,7 @@ async function loadAll(){
   // Daily physical-task time budget, in minutes, for Josh-owned deficiencies only.
   // Trade-owned deficiencies and phase checks don't count against it — those
   // aren't blocks of Josh's personal time the way his own deficiencies are.
-  state.dailyAllowanceMinutes = await sget('dailyAllowanceMinutes', 240);
+  state.dailyAllowanceMinutes = await sget('dailyAllowanceMinutes', 480);
   state.units = await sget('units', DEFAULT_UNITS);
   state.master = await sget('master', DEFAULT_MASTER);
   state.instances = await sget('instances', null);
@@ -547,7 +547,7 @@ const PLAN_DEFAULT_ESTIMATE = 30;
    budget — they're rounds follow-ups, not Josh's own task time. */
 function buildSuggestedPlan(){
   const today = todayISO();
-  const budget = state.dailyAllowanceMinutes || 240;
+  const budget = state.dailyAllowanceMinutes || 480;
 
   const defCandidates = state.defs
     .filter(d=>d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=today && isUnitActiveByLocation(d.location))
