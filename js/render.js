@@ -763,8 +763,13 @@ function renderPhaseGroupRow(row, highlight){
         <button class="pcg-item-remove" data-groupid="${g.id}" data-itemid="${it.id}" title="Remove item" style="background:none; border:none; color:var(--ink-dim); font-size:18px; line-height:1; padding:2px 6px; cursor:pointer; flex-shrink:0;">×</button>
       </div>`;
     }
-    html += `<div class="row" style="margin-top:8px; gap:6px;">
-      <input type="text" class="pcg-additem-input" data-groupid="${g.id}" placeholder="Add item…" style="margin-top:0; flex:1;">
+    const existingSubgroups = [...new Set(g.items.map(it=>it.subgroup).filter(Boolean))];
+    const sectionOptions = ['Blocker', ...existingSubgroups.filter(s=>s!=='Blocker')];
+    html += `<div class="row" style="margin-top:8px; gap:6px; flex-wrap:wrap;">
+      <select class="pcg-additem-section" data-groupid="${g.id}" style="margin-top:0; flex:1 1 120px;">
+        ${sectionOptions.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}
+      </select>
+      <input type="text" class="pcg-additem-input" data-groupid="${g.id}" placeholder="Add item…" style="margin-top:0; flex:2 1 160px;">
       <button class="btn small ghost pcg-additem-btn" data-groupid="${g.id}">Add</button>
     </div>`;
     html += `</div>`;
@@ -966,17 +971,28 @@ function openUnitDetail(unitId){
     const addItem = async()=>{
       const groupId = btn.dataset.groupid;
       const input = document.querySelector(`.pcg-additem-input[data-groupid="${groupId}"]`);
+      const section = document.querySelector(`.pcg-additem-section[data-groupid="${groupId}"]`);
       const text = input.value.trim();
       if(!text) return;
       const g = state.checklistGroups.find(x=>x.id===groupId);
       if(!g) return;
-      g.items.push({id:uid(), text});
+      const subgroup = section ? section.value : 'Blocker';
+      // Insert after the last existing item in the same section, so the new
+      // item actually lands in that section instead of just tacking onto the
+      // very end of the list (which would visually fall under whatever
+      // section happens to be last, usually QC).
+      let insertAt = g.items.length;
+      for(let i=g.items.length-1; i>=0; i--){
+        if(g.items[i].subgroup===subgroup){ insertAt = i+1; break; }
+      }
+      g.items.splice(insertAt, 0, {id:uid(), text, subgroup});
       await sset('checklistGroups', state.checklistGroups);
       showToast('Item added.');
       openUnitDetail(unitId);
     };
     btn.onclick = (e)=>{ e.stopPropagation(); addItem(); };
   });
+  document.querySelectorAll('.pcg-additem-section').forEach(sel=>sel.onclick=(e)=>e.stopPropagation());
   document.querySelectorAll('.pcg-additem-input').forEach(input=>{
     input.onclick = (e)=>e.stopPropagation();
     input.onkeydown = (e)=>{
