@@ -443,11 +443,12 @@ function cardForInstance(inst, m, u, due, st){
 
 function planPhaseCard(item){
   const st = dueStatus(item.due, 'Open');
+  const dueText = item.due ? ` · due ${fmtDate(item.due)}` : '';
   return `<div class="card ${st} plan-phase-card" data-unitid="${item.unit.id}" style="cursor:pointer;">
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(item.group.name)}</div>
-        <div class="item-meta">${escapeHtml(item.unit.name)} · Phase Check · due ${fmtDate(item.due)}</div>
+        <div class="item-meta">${escapeHtml(item.unit.name)} · Phase Check${dueText}</div>
       </div>
       <span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>

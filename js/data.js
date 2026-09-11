@@ -374,20 +374,14 @@ async function migrateClearPhaseChecklists_v1(){
 function makeGroupInstance(unitId, groupId){
   return {id:uid(), unitId, groupId, itemStatus:{}, dueOverride:null, createdDate:todayISO()};
 }
+/* No longer computed from synced schedule finish dates - Josh tracks actual
+   dates in another app and doesn't need this one re-syncing them. Phase
+   checklists are surfaced by matching a unit's Current Phase (see
+   currentPhaseChecklistGroup below) instead of a due date. dueOverrideGlobal
+   (set on the group itself) and dueOverride (set per unit instance) still
+   work if a specific date is ever wanted on a specific checklist. */
 function groupDueDate(unitId, group){
-  if(group.dueOverrideGlobal) return group.dueOverrideGlobal;
-  if(!group.matchPhase) return null;
-  const u = state.units.find(x=>x.id===unitId);
-  if(!u) return null;
-  const phase = group.matchPhase.toLowerCase();
-  const matches = state.schedule.filter(s =>
-    s.location && s.location.toLowerCase().includes(u.name.toLowerCase()) &&
-    s.subject && (group.exactMatch ? s.subject.trim().toLowerCase()===phase : s.subject.toLowerCase().includes(phase)) &&
-    s.finishDate
-  );
-  if(matches.length===0) return null;
-  const finish = matches.map(m=>m.finishDate).sort()[0];
-  return addDays(finish, -group.offsetDays);
+  return group.dueOverrideGlobal || null;
 }
 /* Finds the checklist group whose matchPhase corresponds to a unit's
    currently-selected phase (Log Round's Current Phase dropdown, itself
@@ -439,19 +433,21 @@ function buildSuggestedPlan(){
 
   // Phase checks are never time-budgeted or deferrable — only Josh's own
   // deficiencies compete for his daily allowance, since a phase check isn't a
-  // block of Josh's personal time the way his own deficiency is.
+  // block of Josh's personal time the way his own deficiency is. They surface
+  // by matching each active unit's Current Phase (set from round logging),
+  // same as the Current Phase Checklist section in Unit Detail — not from a
+  // due date, since Josh verifies actual schedule dates in another app.
   const phaseToday = [];
   for(const u of state.units){
     if(!u.active) continue;
-    for(const gi of state.groupInstances.filter(x=>x.unitId===u.id)){
-      const g = state.checklistGroups.find(x=>x.id===gi.groupId);
-      if(!g) continue;
-      const due = gi.dueOverride || groupDueDate(u.id, g);
-      if(!due || due>today) continue;
-      const {done,total} = groupCompletion(gi, g);
-      if(done>=total) continue;
-      phaseToday.push({type:'phase', due, unit:u, group:g, groupInstance:gi});
-    }
+    const g = currentPhaseChecklistGroup(u);
+    if(!g) continue;
+    const gi = state.groupInstances.find(x=>x.unitId===u.id && x.groupId===g.id);
+    if(!gi) continue;
+    const {done,total} = groupCompletion(gi, g);
+    if(total>0 && done>=total) continue;
+    const due = gi.dueOverride || groupDueDate(u.id, g);
+    phaseToday.push({type:'phase', due, unit:u, group:g, groupInstance:gi});
   }
 
   const selectedDefs = [], deferred = [];
