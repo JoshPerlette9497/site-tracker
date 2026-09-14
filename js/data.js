@@ -319,7 +319,7 @@ const PHASE_CHECKLIST_SEED = [
     {id:uid(), text:'door hinge screws color-match', subgroup:'QC'},
     {id:uid(), text:'all mechanical fixtures undamaged', subgroup:'QC'},
   ]},
-  {id:'pcg_construction_qc', name:'CONSTRUCTION QC', matchPhase:'Construction Clean', exactMatch:true, items:[
+  {id:'pcg_construction_qc', name:'CONSTRUCTION QC', matchPhase:'Construction Walkthrough', exactMatch:true, items:[
     {id:uid(), text:'homeowner eyes crooked/straight/clean', subgroup:'QC'},
     {id:uid(), text:'missing/incomplete fixtures', subgroup:'QC'},
     {id:uid(), text:'all fixtures operate interior and exterior', subgroup:'QC'},
