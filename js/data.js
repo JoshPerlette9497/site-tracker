@@ -90,12 +90,265 @@ const CHECKLIST_GROUPS_SEED = [
 ];
 CHECKLIST_GROUPS_SEED.forEach(g => { g.estimatedMinutes = 20; });
 
-// Retired per Josh's request (145 one-per-schedule-item groups with a QC
-// list each proved impossible to maintain) - replaced with a smaller, broader
-// set of groups once he re-uploads revised checklists and tells us which
-// schedule items each one covers. Empty until then; loadAll()'s migration
-// below has already cleared any live data left over from the old library.
-const PHASE_CHECKLIST_SEED = [];
+// Rebuilt per Josh's "By Phase" spreadsheet: one flat QC list per broad
+// construction phase (not one per schedule item like the retired 145-group
+// library). matchPhase links a group to the exact schedule item name Josh
+// picks as a unit's Current Phase in round logging - only set once he's told
+// us which schedule item a given list belongs to; groups without one yet
+// still import and stay fully checkable, they just don't surface under
+// "Current Phase Checklist" or in the Brief until they're mapped.
+const PHASE_CHECKLIST_SEED = [
+  {id:'pcg_pre_excavation_qc', name:'PRE-EXCAVATION QC', matchPhase:'Stake', exactMatch:true, items:[
+    {id:uid(), text:'dirt dumping zone', subgroup:'QC'},
+    {id:uid(), text:'hydrovac utilities', subgroup:'QC'},
+    {id:uid(), text:'stake out booked', subgroup:'QC'},
+    {id:uid(), text:'cut sheet from cribber', subgroup:'QC'},
+    {id:uid(), text:'plans knowledge: grades of buildings and exteriors', subgroup:'QC'},
+    {id:uid(), text:'plans knowledge: tar/weeping tile locations', subgroup:'QC'},
+    {id:uid(), text:'plans knowledge: locations of exterior utilities on building', subgroup:'QC'},
+    {id:uid(), text:'plans knowledge: "how it\'s built before it\'s built"', subgroup:'QC'},
+  ]},
+  {id:'pcg_excavation_qc', name:'EXCAVATION QC', matchPhase:'Excavation', exactMatch:true, items:[
+    {id:uid(), text:'excavation cut as per plan', subgroup:'QC'},
+    {id:uid(), text:'over-excavated for worker safety', subgroup:'QC'},
+    {id:uid(), text:'utilities undamaged', subgroup:'QC'},
+    {id:uid(), text:'dirt tracking cleaned from roads and curbs', subgroup:'QC'},
+    {id:uid(), text:'curbs undamaged', subgroup:'QC'},
+    {id:uid(), text:'sewer trench cut with adequate slope', subgroup:'QC'},
+    {id:uid(), text:'electricy/gas utilities excavated to building', subgroup:'QC'},
+    {id:uid(), text:'gas stub uncovered minimum 24"', subgroup:'QC'},
+  ]},
+  {id:'pcg_sewer_trench_qc', name:'SEWER TRENCH QC', matchPhase:'Install Sewer Trench', exactMatch:true, items:[
+    {id:uid(), text:'site signage installed for inspection', subgroup:'QC'},
+    {id:uid(), text:'no excess plumbing fittings as per code', subgroup:'QC'},
+    {id:uid(), text:'sanitary/storm lines are correct 4" sizing', subgroup:'QC'},
+    {id:uid(), text:'lines are stubbed into foundation according to SOG or BSMT', subgroup:'QC'},
+    {id:uid(), text:'clean outs installed as per code', subgroup:'QC'},
+    {id:uid(), text:'excavators backfilled flushto BOF', subgroup:'QC'},
+    {id:uid(), text:'all material and dirt tracking cleaned', subgroup:'QC'},
+    {id:uid(), text:'ATCO: book gas riser inspection as per cribbing schedule', subgroup:'QC'},
+    {id:uid(), text:'tarps on site for cold weather concrete pours', subgroup:'QC'},
+    {id:uid(), text:'water line stubbed out 8-10\' above grade', subgroup:'QC'},
+  ]},
+  {id:'pcg_foundations_qc', name:'FOUNDATIONS QC', matchPhase:'Strip Walls', exactMatch:true, items:[
+    {id:uid(), text:'MARK GRADES: address/utilities/grades', subgroup:'QC'},
+    {id:uid(), text:'groundworks gravel on site', subgroup:'QC'},
+    {id:uid(), text:'utilities installed in correct locations', subgroup:'QC'},
+    {id:uid(), text:'panel backer installed where applicable for utilities', subgroup:'QC'},
+    {id:uid(), text:'plumbing knock outs in concrete installed as per plan', subgroup:'QC'},
+  ]},
+  {id:'pcg_undergrounds_qc', name:'UNDERGROUNDS QC', matchPhase:'Mark Grades', exactMatch:true, items:[
+    {id:uid(), text:'electric and data lines installed as per plan', subgroup:'QC'},
+    {id:uid(), text:'tar/weeping tile/gravel complete as necessary', subgroup:'QC'},
+    {id:uid(), text:'utilities strapped to prevent movement during backfill', subgroup:'QC'},
+  ]},
+  {id:'pcg_backfill_qc', name:'BACKFILL QC', matchPhase:'Backfill', exactMatch:true, items:[
+    {id:uid(), text:'send SI\'s/selections/CO\'s/IFC\'s as applicable', subgroup:'QC'},
+    {id:uid(), text:'garaged sloped adequately', subgroup:'QC'},
+    {id:uid(), text:'backfill accounting for slabs prep', subgroup:'QC'},
+    {id:uid(), text:'exterior backfill to subgrade', subgroup:'QC'},
+    {id:uid(), text:'winter heat for groundworks/slabs', subgroup:'QC'},
+  ]},
+  {id:'pcg_plumbing_groundworks_qc', name:'PLUMBING GROUNDWORKS QC', matchPhase:'Groundworks', exactMatch:true, items:[
+    {id:uid(), text:'plumbing groundworks installed as per code', subgroup:'QC'},
+    {id:uid(), text:'clean outs installed as per code', subgroup:'QC'},
+    {id:uid(), text:'drains installed as per planned location and wall assembly', subgroup:'QC'},
+    {id:uid(), text:'plumbing groundworks properly supported from sinking and lateral movement', subgroup:'QC'},
+  ]},
+  {id:'pcg_concrete_slabs_qc', name:'CONCRETE SLABS QC', matchPhase:'Pour Garage Slab', exactMatch:true, items:[
+    {id:uid(), text:'slabs prepped and poured as per grades', subgroup:'QC'},
+    {id:uid(), text:'garage 2% slope maintained', subgroup:'QC'},
+    {id:uid(), text:'mechanical room height correct to grade', subgroup:'QC'},
+    {id:uid(), text:'construction gas meter ordered and installed', subgroup:'QC'},
+  ]},
+  {id:'pcg_framing_qc', name:'FRAMING QC', matchPhase:'Frame Check', exactMatch:true, items:[
+    {id:uid(), text:'architectural layout and dimensions as per plan', subgroup:'QC'},
+    {id:uid(), text:'structural layout and dimensions as per plan', subgroup:'QC'},
+    {id:uid(), text:'walls/ceilings straight/plumb', subgroup:'QC'},
+    {id:uid(), text:'exterior door and window RO\'s square and operational', subgroup:'QC'},
+    {id:uid(), text:'floors have no deflection or squeaks', subgroup:'QC'},
+    {id:uid(), text:'partition walls built as per architectural and code requirements', subgroup:'QC'},
+    {id:uid(), text:'insulation stops installed and secured', subgroup:'QC'},
+    {id:uid(), text:'backing allows insulation/poly/drywall installation', subgroup:'QC'},
+    {id:uid(), text:'interior door RO\'s to plan and accommodate casing', subgroup:'QC'},
+    {id:uid(), text:'framing in for handrail/cabinet/appliance spacing', subgroup:'QC'},
+    {id:uid(), text:'framed backing in for mechanical trades', subgroup:'QC'},
+    {id:uid(), text:'bathrooms fit tubs/showers as per wall assembly', subgroup:'QC'},
+    {id:uid(), text:'backing in for bathroom fixtures', subgroup:'QC'},
+    {id:uid(), text:'joist layout in for plumbing drains', subgroup:'QC'},
+    {id:uid(), text:'framing plumb/straight for tile locations', subgroup:'QC'},
+    {id:uid(), text:'stairs correct for finished layout', subgroup:'QC'},
+    {id:uid(), text:'stair headroom to code', subgroup:'QC'},
+    {id:uid(), text:'stair handrail/underside backing', subgroup:'QC'},
+    {id:uid(), text:'exterior plumb and aligned and backing in for all siding', subgroup:'QC'},
+    {id:uid(), text:'fascia/soffit correct for roofing overhangs', subgroup:'QC'},
+    {id:uid(), text:'roof access cut out', subgroup:'QC'},
+    {id:uid(), text:'exterior partition firestopping installed', subgroup:'QC'},
+    {id:uid(), text:'garage RO correct', subgroup:'QC'},
+    {id:uid(), text:'garage ceiling and wall backing', subgroup:'QC'},
+    {id:uid(), text:'garage structural components as per plan', subgroup:'QC'},
+    {id:uid(), text:'deck structural components as per plan', subgroup:'QC'},
+    {id:uid(), text:'BELLA: basement stair blocking for foam insulation', subgroup:'QC'},
+    {id:uid(), text:'HERITAGE: laundry room fits machines', subgroup:'QC'},
+    {id:uid(), text:'HERITAGE: end unit plumbing walls in for HVAC runs at exterior jogs', subgroup:'QC'},
+    {id:uid(), text:'HERITAGE: kitchen wall inset for fridge', subgroup:'QC'},
+  ]},
+  {id:'pcg_rough_in_prep_qc', name:'ROUGH-IN PREP QC', matchPhase:'Load Roof', exactMatch:true, items:[
+    {id:uid(), text:'All frame check lists complete', subgroup:'QC'},
+    {id:uid(), text:'mud/snow control mats placed for accessibility', subgroup:'QC'},
+    {id:uid(), text:'framing cleaned and swept', subgroup:'QC'},
+    {id:uid(), text:'all rough-in mark outs completed', subgroup:'QC'},
+    {id:uid(), text:'customer selections and flooring cuts finalized and posted in units', subgroup:'QC'},
+    {id:uid(), text:'roofing completed', subgroup:'QC'},
+    {id:uid(), text:'driveways prepped/poured', subgroup:'QC'},
+    {id:uid(), text:'lay down area for drywall garbage and siding material', subgroup:'QC'},
+    {id:uid(), text:'roofing material cleaned', subgroup:'QC'},
+    {id:uid(), text:'roofing overhangs according to siding specs', subgroup:'QC'},
+    {id:uid(), text:'construction heat on site and installed', subgroup:'QC'},
+    {id:uid(), text:'construction door knobs installed', subgroup:'QC'},
+    {id:uid(), text:'exterior clean and free of trip-hazards for following trades', subgroup:'QC'},
+  ]},
+  {id:'pcg_rough_in_qc', name:'ROUGH-IN QC', matchPhase:'Firestopping', exactMatch:true, items:[
+    {id:uid(), text:'all rough-in\'s complete and photos', subgroup:'QC'},
+    {id:uid(), text:'mechanical locations match plans (sinks/tubs/showers/appliances/mechanical room)', subgroup:'QC'},
+    {id:uid(), text:'rough-in\'s do not conflict with each other', subgroup:'QC'},
+    {id:uid(), text:'no framing damage', subgroup:'QC'},
+    {id:uid(), text:'required blocking remains functional', subgroup:'QC'},
+    {id:uid(), text:'mechanical clearances maintained', subgroup:'QC'},
+    {id:uid(), text:'kitchen OTR to match mark out', subgroup:'QC'},
+    {id:uid(), text:'roug-in\'s do not impede drywall, or can be covered by bulkheads', subgroup:'QC'},
+    {id:uid(), text:'light switches correct height to stair handrails', subgroup:'QC'},
+    {id:uid(), text:'light locations coordinate with bulkhead locations', subgroup:'QC'},
+    {id:uid(), text:'penetrations properly fire stopped', subgroup:'QC'},
+    {id:uid(), text:'all units cleaned and swept', subgroup:'QC'},
+    {id:uid(), text:'gas meters ordered after inspections', subgroup:'QC'},
+    {id:uid(), text:'gas exterior stubs address labels', subgroup:'QC'},
+    {id:uid(), text:'rough-in components undamaged and protected', subgroup:'QC'},
+    {id:uid(), text:'rough-ins coordinate with future finishes (ie. OTR/hoodfan)', subgroup:'QC'},
+  ]},
+  {id:'pcg_exterior_roof_qc', name:'EXTERIOR/ROOF QC', matchPhase:'Boarding', exactMatch:true, items:[
+    {id:uid(), text:'full siding pieces used in visible locations', subgroup:'QC'},
+    {id:uid(), text:'tyvek and flashing layered according to design', subgroup:'QC'},
+    {id:uid(), text:'siding ready for paint/eavestrough/handrails', subgroup:'QC'},
+    {id:uid(), text:'garage doors/weatherstripping installed as per spec', subgroup:'QC'},
+    {id:uid(), text:'handrails installed as per spec/code', subgroup:'QC'},
+    {id:uid(), text:'all trade materials cleaned and removed', subgroup:'QC'},
+    {id:uid(), text:'siding installed as per architectural patterns/colors', subgroup:'QC'},
+  ]},
+  {id:'pcg_insulation_qc', name:'INSULATION QC', matchPhase:'Insulation', exactMatch:true, items:[
+    {id:uid(), text:'insulation batts/foam/blown-in installed as per assemblies', subgroup:'QC'},
+    {id:uid(), text:'exterior openings spray foamed and sealed', subgroup:'QC'},
+    {id:uid(), text:'framing and mechanical are not damaged', subgroup:'QC'},
+    {id:uid(), text:'tubs/showers are not damaged', subgroup:'QC'},
+    {id:uid(), text:'continuous air/vapour barrier throughout', subgroup:'QC'},
+    {id:uid(), text:'insulation is dry and clean', subgroup:'QC'},
+  ]},
+  {id:'pcg_drywall_qc', name:'DRYWALL QC', matchPhase:'Taping', exactMatch:true, items:[
+    {id:uid(), text:'garages boarded to accommodate garage door installation', subgroup:'QC'},
+    {id:uid(), text:'mechanical penetration holes cut tight', subgroup:'QC'},
+    {id:uid(), text:'drywall installed as per assemblies', subgroup:'QC'},
+    {id:uid(), text:'bulkheads framed/boarded and are straight', subgroup:'QC'},
+    {id:uid(), text:'drywall does not conflict with flooring/cabinets/tile', subgroup:'QC'},
+    {id:uid(), text:'drywall vacuum includes window/door sills and tubs', subgroup:'QC'},
+    {id:uid(), text:'locations for cabinets and mirrors are not bowed', subgroup:'QC'},
+  ]},
+  {id:'pcg_finishing_ph1_qc', name:'FINISHING PH1 QC', matchPhase:'Paint Vac', exactMatch:true, items:[
+    {id:uid(), text:'primer on all surfaces and inside corners cut', subgroup:'QC'},
+    {id:uid(), text:'S1 carpentry correct as per selections and flooring', subgroup:'QC'},
+    {id:uid(), text:'S1 carpentry straight and secure', subgroup:'QC'},
+    {id:uid(), text:'interior doors operate', subgroup:'QC'},
+    {id:uid(), text:'cabinets level and plumb', subgroup:'QC'},
+    {id:uid(), text:'cabinets accommodate tile backsplash and appliance dimensions', subgroup:'QC'},
+    {id:uid(), text:'DW touch ups complete and fix any previous trade damage', subgroup:'QC'},
+    {id:uid(), text:'change furnace filter', subgroup:'QC'},
+    {id:uid(), text:'cabinet DAP is clean', subgroup:'QC'},
+    {id:uid(), text:'cabinet cutouts in for mechanical', subgroup:'QC'},
+  ]},
+  {id:'pcg_finishing_ph2_qc', name:'FINISHING PH2 QC', matchPhase:'Tile', exactMatch:true, items:[
+    {id:uid(), text:'change furnace filter', subgroup:'QC'},
+    {id:uid(), text:'tubs clean for tile workers', subgroup:'QC'},
+    {id:uid(), text:'paint coverage on all surfaces', subgroup:'QC'},
+    {id:uid(), text:'correct countertops installed as per selections', subgroup:'QC'},
+    {id:uid(), text:'countertop openings are correct for sinks and appliances', subgroup:'QC'},
+    {id:uid(), text:'flush-mount kitchen/bath sinks installed as per selections', subgroup:'QC'},
+    {id:uid(), text:'countertop seams/edges flush and tight', subgroup:'QC'},
+    {id:uid(), text:'countertop cutouts in for mechanical', subgroup:'QC'},
+  ]},
+  {id:'pcg_finishing_ph3_qc', name:'FINISHING PH3 QC', matchPhase:'Floor QC', exactMatch:true, items:[
+    {id:uid(), text:'tile complete for OTR install and shower glass measuring', subgroup:'QC'},
+    {id:uid(), text:'HVAC floor holes cut out', subgroup:'QC'},
+    {id:uid(), text:'correct OTR installed as per selections', subgroup:'QC'},
+    {id:uid(), text:'LVP installed to be covered by baseboard and cabinet toe kicks', subgroup:'QC'},
+    {id:uid(), text:'LVP joints tight and not cracking', subgroup:'QC'},
+    {id:uid(), text:'LVP undamaged', subgroup:'QC'},
+    {id:uid(), text:'flooring transitions smoothly and tight to baseboard/casing', subgroup:'QC'},
+    {id:uid(), text:'carpet free of gaps and loose threads', subgroup:'QC'},
+    {id:uid(), text:'mirrors/wire shelves/shower glass have been measured', subgroup:'QC'},
+  ]},
+  {id:'pcg_finishing_ph4_qc', name:'FINISHING PH4 QC', matchPhase:'Deliver Light Fixtures', exactMatch:true, items:[
+    {id:uid(), text:'change furnace filter', subgroup:'QC'},
+    {id:uid(), text:'S2 hardward installed and operational', subgroup:'QC'},
+    {id:uid(), text:'house numbers installed; correct digits', subgroup:'QC'},
+    {id:uid(), text:'mirrors tight to walls and level', subgroup:'QC'},
+    {id:uid(), text:'wire shelving correct layout and all level', subgroup:'QC'},
+    {id:uid(), text:'shower glass tight to fixtures', subgroup:'QC'},
+    {id:uid(), text:'shower glass siliconed and waterproof', subgroup:'QC'},
+    {id:uid(), text:'sliding shower doors do not rub each other', subgroup:'QC'},
+    {id:uid(), text:'all installs are undamaged', subgroup:'QC'},
+    {id:uid(), text:'installed hardware doesn’t impede mechanical', subgroup:'QC'},
+  ]},
+  {id:'pcg_finishing_finals_qc', name:'FINISHING FINALS QC', matchPhase:'Appliance Install', exactMatch:true, items:[
+    {id:uid(), text:'plumbing fixtures as per selections', subgroup:'QC'},
+    {id:uid(), text:'plumbing fixtures siliconed/DAP/escutcheons as per plan', subgroup:'QC'},
+    {id:uid(), text:'plumbing leak-free', subgroup:'QC'},
+    {id:uid(), text:'HVAC AC install as per selections', subgroup:'QC'},
+    {id:uid(), text:'HVAC grills tight to floors and walls', subgroup:'QC'},
+    {id:uid(), text:'HVAC furnace and HRV controllers tight to walls and operational', subgroup:'QC'},
+    {id:uid(), text:'lights correct color as per  selections', subgroup:'QC'},
+    {id:uid(), text:'lights centered on sinks/cabinets', subgroup:'QC'},
+    {id:uid(), text:'lights tight to ceiling', subgroup:'QC'},
+    {id:uid(), text:'switches/outlets tight to walls', subgroup:'QC'},
+    {id:uid(), text:'all mechancial devices level/tight/flush', subgroup:'QC'},
+    {id:uid(), text:'appliances installed and operational', subgroup:'QC'},
+    {id:uid(), text:'appliances level', subgroup:'QC'},
+    {id:uid(), text:'mechanical connections to appliances visually good', subgroup:'QC'},
+    {id:uid(), text:'DW touch ups ready for final paint', subgroup:'QC'},
+    {id:uid(), text:'window screens', subgroup:'QC'},
+    {id:uid(), text:'self-closing doors', subgroup:'QC'},
+    {id:uid(), text:'WOCD locks', subgroup:'QC'},
+    {id:uid(), text:'door hinge screws color-match', subgroup:'QC'},
+    {id:uid(), text:'all mechanical fixtures undamaged', subgroup:'QC'},
+  ]},
+  {id:'pcg_construction_qc', name:'CONSTRUCTION QC', matchPhase:'Construction Walkthrough', exactMatch:true, items:[
+    {id:uid(), text:'homeowner eyes crooked/straight/clean', subgroup:'QC'},
+    {id:uid(), text:'missing/incomplete fixtures', subgroup:'QC'},
+    {id:uid(), text:'all fixtures operate interior and exterior', subgroup:'QC'},
+    {id:uid(), text:'wall/ceiling/floor/window damage', subgroup:'QC'},
+    {id:uid(), text:'all fixtures/hardware coordination has no conflicts', subgroup:'QC'},
+    {id:uid(), text:'homeowner eyes transitions', subgroup:'QC'},
+    {id:uid(), text:'exterior is accessible', subgroup:'QC'},
+  ]},
+  {id:'pcg_tasks_con_qc', name:'CONSTRUCTION QC TASKS', matchPhase:'Construction Clean', exactMatch:true, items:[
+    {id:uid(), text:'appliance clocks', subgroup:'QC'},
+    {id:uid(), text:'mechanical rooms spotless', subgroup:'QC'},
+    {id:uid(), text:'pressure wash garage/porches/decks/driveways', subgroup:'QC'},
+    {id:uid(), text:'remove door sill/latch films', subgroup:'QC'},
+    {id:uid(), text:'remove smoke detector shower caps', subgroup:'QC'},
+    {id:uid(), text:'organize cabinets', subgroup:'QC'},
+    {id:uid(), text:'bipass door bumpers', subgroup:'QC'},
+    {id:uid(), text:'change furnace filter', subgroup:'QC'},
+    {id:uid(), text:'garage door remotes to kitchen', subgroup:'QC'},
+    {id:uid(), text:'BELLA/MONARCH: powder room mirror install', subgroup:'QC'},
+    {id:uid(), text:'paint tag for TU\'s', subgroup:'QC'},
+  ]},
+  {id:'pcg_possession_closeout', name:'POSSESSION TASKS', matchPhase:'Pre-Occ Walkthrough', exactMatch:true, items:[
+    {id:uid(), text:'HWT turned ON', subgroup:'QC'},
+    {id:uid(), text:'Humidifier plugged in and ON', subgroup:'QC'},
+    {id:uid(), text:'Appliance clocks', subgroup:'QC'},
+    {id:uid(), text:'Doors rekey', subgroup:'QC'},
+    {id:uid(), text:'Check all sinks appliances WATER ON', subgroup:'QC'},
+  ]},
+];
 
 // offsetDays: days BEFORE the matched schedule finish date the item is due.
 // matchPhase: text used to match against synced schedule event subjects (case-insensitive substring).
@@ -173,6 +426,7 @@ async function loadAll(){
   await migratePhaseChecklistRewrite_v1();
   await migratePossessionExactMatch_v1();
   await migrateClearPhaseChecklists_v1();
+  await migratePhaseChecklistByPhaseSeed_v1();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -371,23 +625,38 @@ async function migrateClearPhaseChecklists_v1(){
   await sset('migrated_clear_phase_checklists_v1', true);
 }
 
+/* Loads Josh's "By Phase" rebuild (22 broad QC groups, replacing the empty
+   library the clear migration above left behind) and creates an instance of
+   each on every active unit. Runs once, gated by the flag below - future
+   schedule-item mappings for the still-unmapped groups are applied as small
+   patch migrations (same pattern as migratePossessionExactMatch_v1) rather
+   than by re-running this one. */
+async function migratePhaseChecklistByPhaseSeed_v1(){
+  const done = await sget('migrated_phase_checklist_byphase_v1', false);
+  if(done) return;
+  state.checklistGroups = PHASE_CHECKLIST_SEED.slice();
+  state.groupInstances = [];
+  for(const u of state.units){
+    if(u.active){
+      for(const g of state.checklistGroups){ state.groupInstances.push(makeGroupInstance(u.id, g.id)); }
+    }
+  }
+  await sset('checklistGroups', state.checklistGroups);
+  await sset('groupInstances', state.groupInstances);
+  await sset('migrated_phase_checklist_byphase_v1', true);
+}
+
 function makeGroupInstance(unitId, groupId){
   return {id:uid(), unitId, groupId, itemStatus:{}, dueOverride:null, createdDate:todayISO()};
 }
+/* No longer computed from synced schedule finish dates - Josh tracks actual
+   dates in another app and doesn't need this one re-syncing them. Phase
+   checklists are surfaced by matching a unit's Current Phase (see
+   currentPhaseChecklistGroup below) instead of a due date. dueOverrideGlobal
+   (set on the group itself) and dueOverride (set per unit instance) still
+   work if a specific date is ever wanted on a specific checklist. */
 function groupDueDate(unitId, group){
-  if(group.dueOverrideGlobal) return group.dueOverrideGlobal;
-  if(!group.matchPhase) return null;
-  const u = state.units.find(x=>x.id===unitId);
-  if(!u) return null;
-  const phase = group.matchPhase.toLowerCase();
-  const matches = state.schedule.filter(s =>
-    s.location && s.location.toLowerCase().includes(u.name.toLowerCase()) &&
-    s.subject && (group.exactMatch ? s.subject.trim().toLowerCase()===phase : s.subject.toLowerCase().includes(phase)) &&
-    s.finishDate
-  );
-  if(matches.length===0) return null;
-  const finish = matches.map(m=>m.finishDate).sort()[0];
-  return addDays(finish, -group.offsetDays);
+  return group.dueOverrideGlobal || null;
 }
 /* Finds the checklist group whose matchPhase corresponds to a unit's
    currently-selected phase (Log Round's Current Phase dropdown, itself
@@ -397,7 +666,11 @@ function groupDueDate(unitId, group){
 function currentPhaseChecklistGroup(u){
   if(!u.currentPhase) return null;
   const phase = u.currentPhase.toLowerCase();
-  return state.checklistGroups.find(g => g.matchPhase && phase.includes(g.matchPhase.toLowerCase())) || null;
+  return state.checklistGroups.find(g => {
+    if(!g.matchPhase) return false;
+    const mp = g.matchPhase.toLowerCase();
+    return g.exactMatch ? phase===mp : phase.includes(mp);
+  }) || null;
 }
 
 function groupCompletion(inst, group){
@@ -439,19 +712,21 @@ function buildSuggestedPlan(){
 
   // Phase checks are never time-budgeted or deferrable — only Josh's own
   // deficiencies compete for his daily allowance, since a phase check isn't a
-  // block of Josh's personal time the way his own deficiency is.
+  // block of Josh's personal time the way his own deficiency is. They surface
+  // by matching each active unit's Current Phase (set from round logging),
+  // same as the Current Phase Checklist section in Unit Detail — not from a
+  // due date, since Josh verifies actual schedule dates in another app.
   const phaseToday = [];
   for(const u of state.units){
     if(!u.active) continue;
-    for(const gi of state.groupInstances.filter(x=>x.unitId===u.id)){
-      const g = state.checklistGroups.find(x=>x.id===gi.groupId);
-      if(!g) continue;
-      const due = gi.dueOverride || groupDueDate(u.id, g);
-      if(!due || due>today) continue;
-      const {done,total} = groupCompletion(gi, g);
-      if(done>=total) continue;
-      phaseToday.push({type:'phase', due, unit:u, group:g, groupInstance:gi});
-    }
+    const g = currentPhaseChecklistGroup(u);
+    if(!g) continue;
+    const gi = state.groupInstances.find(x=>x.unitId===u.id && x.groupId===g.id);
+    if(!gi) continue;
+    const {done,total} = groupCompletion(gi, g);
+    if(total>0 && done>=total) continue;
+    const due = gi.dueOverride || groupDueDate(u.id, g);
+    phaseToday.push({type:'phase', due, unit:u, group:g, groupInstance:gi});
   }
 
   const selectedDefs = [], deferred = [];
