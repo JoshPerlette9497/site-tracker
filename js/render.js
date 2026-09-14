@@ -812,19 +812,27 @@ function openUnitDetail(unitId){
   if(history.length===0){
     html += `<div class="empty">No rounds logged yet.</div>`;
   } else {
-    for(const r of history){
-      html += `<div class="card">
-        <div class="item-meta" style="font-weight:700;">${fmtDate(r.date)} — ${r.risk}</div>
-        <div class="item-meta" style="margin-top:4px;">${escapeHtml(r.currentPhase||'—')}</div>
-        <div class="item-meta">${r.ctEnd?'Trade ends '+fmtDate(r.ctEnd)+' · ':''}Next: ${escapeHtml(r.nextTrade||'—')}</div>
-        ${r.notes?`<div style="font-size:13px; margin-top:6px;">${escapeHtml(r.notes)}</div>`:''}
-        ${r.tradeCompliance?`<div style="font-size:13px; margin-top:6px;"><b>On time/clean/safety:</b> ${escapeHtml(r.tradeCompliance)}</div>`:''}
-        ${r.cleanup?`<div style="font-size:13px; margin-top:4px;"><b>Cleanup:</b> ${escapeHtml(r.cleanup)}</div>`:''}
-        ${r.nextTradeRisk?`<div style="font-size:13px; margin-top:4px;"><b>Risk for next trade:</b> ${escapeHtml(r.nextTradeRisk)}</div>`:''}
-        ${r.next14Risk?`<div style="font-size:13px; margin-top:4px;"><b>Risk — next 14 days:</b> ${escapeHtml(r.next14Risk)}</div>`:''}
-        ${r.next90Prep?`<div style="font-size:13px; margin-top:4px;"><b>Line up — next 1-3 months:</b> ${escapeHtml(r.next90Prep)}</div>`:''}
-      </div>`;
+    // A flat list of every logged round got unreadable once a unit had months
+    // of history - show one at a time, picked from a dropdown, defaulting to
+    // the most recent.
+    if(!history.some(r=>r.id===selectedRoundHistoryId[unitId])){
+      selectedRoundHistoryId[unitId] = history[0].id;
     }
+    html += `<select id="udRoundHistorySelect" style="margin:0 4px 8px; width:calc(100% - 8px);">
+      ${history.map(r=>`<option value="${r.id}" ${r.id===selectedRoundHistoryId[unitId]?'selected':''}>${fmtDate(r.date)} — ${r.risk}</option>`).join('')}
+    </select>`;
+    const r = history.find(x=>x.id===selectedRoundHistoryId[unitId]);
+    html += `<div class="card">
+      <div class="item-meta" style="font-weight:700;">${fmtDate(r.date)} — ${r.risk}</div>
+      <div class="item-meta" style="margin-top:4px;">${escapeHtml(r.currentPhase||'—')}</div>
+      <div class="item-meta">${r.ctEnd?'Trade ends '+fmtDate(r.ctEnd)+' · ':''}Next: ${escapeHtml(r.nextTrade||'—')}</div>
+      ${r.notes?`<div style="font-size:13px; margin-top:6px;">${escapeHtml(r.notes)}</div>`:''}
+      ${r.tradeCompliance?`<div style="font-size:13px; margin-top:6px;"><b>On time/clean/safety:</b> ${escapeHtml(r.tradeCompliance)}</div>`:''}
+      ${r.cleanup?`<div style="font-size:13px; margin-top:4px;"><b>Cleanup:</b> ${escapeHtml(r.cleanup)}</div>`:''}
+      ${r.nextTradeRisk?`<div style="font-size:13px; margin-top:4px;"><b>Risk for next trade:</b> ${escapeHtml(r.nextTradeRisk)}</div>`:''}
+      ${r.next14Risk?`<div style="font-size:13px; margin-top:4px;"><b>Risk — next 14 days:</b> ${escapeHtml(r.next14Risk)}</div>`:''}
+      ${r.next90Prep?`<div style="font-size:13px; margin-top:4px;"><b>Line up — next 1-3 months:</b> ${escapeHtml(r.next90Prep)}</div>`:''}
+    </div>`;
   }
   html += `<div class="section-title">Deficiencies<button class="btn small" id="udAddDefBtn">+ Add</button></div>`;
   if(defs.length===0){
@@ -915,6 +923,11 @@ function openUnitDetail(unitId){
   if(genericClose) genericClose.style.display = 'none';
   document.getElementById('udStickyClose').onclick = closeModal;
   document.getElementById('logRoundBtn').onclick = ()=>openRoundModal(unitId);
+  const roundHistorySelect = document.getElementById('udRoundHistorySelect');
+  if(roundHistorySelect) roundHistorySelect.onchange = (e)=>{
+    selectedRoundHistoryId[unitId] = e.target.value;
+    openUnitDetail(unitId);
+  };
   document.getElementById('editWalkBtn').onclick = ()=>openEditWalkModal(unitId);
   document.getElementById('unitArchiveBtn').onclick = ()=>{
     if(u.active){
@@ -1107,6 +1120,7 @@ function openRoundModal(unitId){
       next90Prep:document.getElementById('rNext90Prep').value.trim()
     });
     await sset('roundHistory', state.roundHistory);
+    delete selectedRoundHistoryId[unitId]; // jump the dropdown back to the just-logged (newest) round
     closeModal();
     showToast('Round logged for ' + u.name);
     openUnitDetail(unitId);
