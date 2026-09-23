@@ -40,6 +40,7 @@
     padding:12px 14px;
     margin-bottom:8px;
   }
+  .now-card .card{border-color:var(--brand-dark); border-width:2px; box-shadow:0 2px 10px rgba(31,92,96,0.15);}
   .card.overdue{border-color:var(--stamp-red); background:#FBEEE8;}
   .card.today{border-color:var(--stamp-amber); background:#FCF3E3;}
   .card.week-urgent{border-color:var(--stamp-red); border-width:2px; background:#FBEEE8;}

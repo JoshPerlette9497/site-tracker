@@ -9,8 +9,7 @@ function setHeader(){
 
 function render(){
   const scrollY = window.scrollY;
-  if(activeTab==='today') renderToday();
-  else if(activeTab==='brief') renderBrief();
+  if(activeTab==='brief') renderBrief();
   else if(activeTab==='units') renderUnits();
   else if(activeTab==='master') renderMaster();
   else if(activeTab==='defs') renderDefs();
@@ -18,6 +17,26 @@ function render(){
   else if(activeTab==='schedule') renderSchedule();
   else if(activeTab==='sync') renderSync();
   window.scrollTo(0, scrollY);
+}
+
+/* Distinct top section on Brief — always the same place to look for "what's
+   next." Just a highlighted preview of the Suggested Plan queue's own first
+   item (below, unchanged), so reordering that queue moves NOW with it
+   instead of the two drifting apart. Falls back to the oldest overdue
+   follow-up when nothing is scheduled — "go check on this" rather than
+   nothing at all. */
+function nowSection(orderedPlan){
+  const top = orderedPlan[0];
+  let inner;
+  if(top){
+    inner = top.type==='def'
+      ? cardForDef(top.ref, dueStatus(top.ref.dueDate, top.ref.status))
+      : planPhaseCard(top);
+  } else {
+    const fu = followUpsDue()[0];
+    inner = fu ? cardForDef(fu, dueStatus(fu.dueDate, fu.status)) : `<div class="empty">Nothing scheduled — Suggested Plan is clear.</div>`;
+  }
+  return `<div class="section-title">Now</div><div class="now-card">${inner}</div>`;
 }
 
 function renderBrief(){
@@ -42,7 +61,11 @@ function renderBrief(){
   const finishingSoon = state.schedule.filter(e=>e.finishDate && e.finishDate>=today && e.finishDate<=tomorrow)
     .sort((a,b)=>(a.finishDate||'').localeCompare(b.finishDate||''));
 
+  const orderedPlan = applyManualOrder(plan.selected);
+
   let html = `<div class="section-title">Daily Brief — ${fmtDate(today)}</div>`;
+
+  html += nowSection(orderedPlan);
 
   html += renderSafetyWalkthroughSection();
 
@@ -50,7 +73,7 @@ function renderBrief(){
   if(plan.selected.length===0){
     html += `<div class="empty">Nothing of yours due or overdue today.</div>`;
   } else {
-    html += `<div id="planScheduleList">` + applyManualOrder(plan.selected).map(item => draggableScheduleItem(item, item.type==='def'
+    html += `<div id="planScheduleList">` + orderedPlan.map(item => draggableScheduleItem(item, item.type==='def'
       ? cardForDef(item.ref, dueStatus(item.ref.dueDate, item.ref.status))
       : planPhaseCard(item)
     )).join('') + `</div>`;
@@ -397,50 +420,6 @@ function wireScheduleActions(){
   });
 }
 
-function renderToday(){
-  const rows = state.instances.map(inst=>{
-    const {m,u,due} = instanceInfo(inst);
-    if(!m||!u||!u.active) return null;
-    return {inst,m,u,due,st:dueStatus(due, inst.status)};
-  }).filter(Boolean).filter(r=>r.st==='overdue'||r.st==='today');
-
-  const defRows = state.defs.filter(d=>d.status!=='Done' && isUnitActiveByLocation(d.location)).map(d=>{
-    return {d,st:dueStatus(d.dueDate, d.status)};
-  }).filter(r=>r.st==='overdue'||r.st==='today');
-
-  rows.sort((a,b)=> (a.due||'').localeCompare(b.due||''));
-
-  let html = `<div class="section-title">Checklist — Due Today / Overdue<span class="pill">${rows.length}</span></div>`;
-  if(rows.length===0) html += `<div class="empty">Nothing due today or overdue. Nice.</div>`;
-  for(const r of rows){
-    html += cardForInstance(r.inst, r.m, r.u, r.due, r.st);
-  }
-
-  html += `<div class="section-title">Deficiencies — Due Today / Overdue<span class="pill">${defRows.length}</span></div>`;
-  if(defRows.length===0) html += `<div class="empty">No deficiencies due.</div>`;
-  for(const r of defRows){
-    html += cardForDef(r.d, r.st);
-  }
-  app.innerHTML = html;
-  wireCardActions();
-}
-
-function cardForInstance(inst, m, u, due, st){
-  return `<div class="card ${st}" data-inst="${inst.id}">
-    <div class="row">
-      <div>
-        <div class="item-name">${escapeHtml(m.name)}</div>
-        <div class="item-meta">${escapeHtml(u.name)} · ${escapeHtml(m.milestone)}${m.area?' · '+escapeHtml(m.area):''} · due ${fmtDate(due)}</div>
-      </div>
-      <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
-    </div>
-    <div class="row" style="margin-top:10px; gap:6px;">
-      <button class="btn small done-btn act-done">Mark Done</button>
-      <button class="btn small ghost act-push">Push</button>
-    </div>
-  </div>`;
-}
-
 function planPhaseCard(item){
   const st = dueStatus(item.due, 'Open');
   const dueText = item.due ? ` · due ${fmtDate(item.due)}` : '';
@@ -471,7 +450,7 @@ function cardForDef(d, st){
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(d.description)}</div>
-        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${priorityTag(d)}${categoryTag(d)}</div>
+        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${d.followUpDate?' · follow up '+fmtDate(d.followUpDate):''}${priorityTag(d)}${categoryTag(d)}</div>
       </div>
       <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>
@@ -1821,8 +1800,8 @@ async function doRestore(){
       await sset('logHistory', state.logHistory);
       await sset('migrated_unit_names_v2', true);
       await sset('migrated_rounds_v1', true);
-      activeTab='today';
-      document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('active', x.dataset.tab==='today'));
+      activeTab='brief';
+      document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('active', x.dataset.tab==='brief'));
       render();
       showToast('Restored. Data from ' + (data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'backup file') + '.');
     }catch(e){ showToast('Restore failed: ' + e.message); }

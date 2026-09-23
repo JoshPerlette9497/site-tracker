@@ -359,7 +359,7 @@ const DEFAULT_MASTER = [
 
 /* ---------- state ---------- */
 let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[] };
-let activeTab = 'today';
+let activeTab = 'brief';
 let selectedScheduleUnit = null;
 let selectedLogDate = null;
 let expandedGroupIds = new Set();
@@ -823,6 +823,21 @@ function buildSuggestedPlan(){
   const tradeToday = state.defs.filter(d=>d.status!=='Done' && d.owner==='Trade' && d.dueDate===today && isUnitActiveByLocation(d.location));
 
   return {selected, deferred, tradeToday, used, budget};
+}
+
+/* Items parked as WAITING/DELEGATED (or any open item) whose follow-up date
+   has arrived — "time to check on this," not a deadline. Feeds the NOW
+   section on Brief as a fallback when nothing is scheduled in today's
+   Suggested Plan queue. Sorted the same way as the plan itself. */
+function followUpsDue(){
+  const today = todayISO();
+  return state.defs
+    .filter(d=>d.status!=='Done' && d.followUpDate && d.followUpDate<=today && isUnitActiveByLocation(d.location))
+    .sort((a,b)=>
+      (a.followUpDate||'').localeCompare(b.followUpDate||'')
+      || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
+      || (a.estimatedMinutes||PLAN_DEFAULT_ESTIMATE)-(b.estimatedMinutes||PLAN_DEFAULT_ESTIMATE)
+    );
 }
 
 /* ---------- Josh's own forward-looking task schedule (plannedDate) ----------
