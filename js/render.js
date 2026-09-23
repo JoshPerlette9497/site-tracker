@@ -529,6 +529,50 @@ function estimateOptionsHtml(selected){
   ).join('');
 }
 
+/* Fires after saving a deficiency (Add or Edit) whose estimate is over an
+   hour — a one-shot ask, not a nag: "Not Now" sets subtaskPromptDismissed
+   so it never re-asks for this same item again. No AI involved by design —
+   Josh names and sizes the subtasks himself, on the spot. */
+function subtaskRowHtml(n){
+  return `<div class="row subtask-row" style="gap:6px; margin-top:6px;">
+    <input type="text" class="subtask-text" placeholder="Subtask ${n}" style="flex:1;">
+    <select class="subtask-minutes">${estimateOptionsHtml()}</select>
+  </div>`;
+}
+function openSubtaskPromptModal(defId, onDone){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d){ onDone(); return; }
+  showModal(`
+    <h2>Break This Down?</h2>
+    <div class="helptext" style="margin-bottom:8px;">"${escapeHtml(d.description)}" is estimated at ${d.estimatedMinutes} min. Split it into smaller subtasks?</div>
+    <div id="subtaskRows">${subtaskRowHtml(1)}</div>
+    <button class="btn small ghost" id="addSubtaskRow" style="margin-top:8px;">+ Add Subtask</button>
+    <div class="divider"></div>
+    <button class="btn" id="saveSubtasks" style="width:100%;">Create Subtasks</button>
+    <button class="btn small ghost" id="skipSubtasks" style="width:100%; margin-top:6px;">Not Now</button>
+  `);
+  document.getElementById('addSubtaskRow').onclick = ()=>{
+    const rows = document.getElementById('subtaskRows');
+    rows.insertAdjacentHTML('beforeend', subtaskRowHtml(rows.children.length+1));
+  };
+  document.getElementById('saveSubtasks').onclick = async()=>{
+    const subtasks = [...document.querySelectorAll('.subtask-row')].map(row=>({
+      text: row.querySelector('.subtask-text').value.trim(),
+      minutes: Number(row.querySelector('.subtask-minutes').value) || null
+    })).filter(s=>s.text);
+    if(!subtasks.length){ showToast('Add at least one subtask, or tap Not Now.'); return; }
+    await splitDefIntoSubtasks(defId, subtasks);
+    closeModal();
+    showToast(`Split into ${subtasks.length} subtask${subtasks.length===1?'':'s'}.`);
+    onDone();
+  };
+  document.getElementById('skipSubtasks').onclick = async()=>{
+    await dismissSubtaskPrompt(defId);
+    closeModal();
+    onDone();
+  };
+}
+
 /* Marks a deficiency done. Josh-owned items get asked how long it actually
    took first (builds real actual-vs-estimate history); Trade-owned items
    don't need that since Trade time was never budgeted in the first place. */
@@ -644,9 +688,13 @@ function openEditDefModal(defId, onSaved){
     const estVal = document.getElementById('edEstimate').value;
     d.estimatedMinutes = (owner!=='Trade' && estVal) ? Number(estVal) : null;
     await sset('defs', state.defs);
-    closeModal();
-    showToast('Deficiency updated.');
-    if(onSaved) onSaved();
+    const finish = ()=>{ showToast('Deficiency updated.'); if(onSaved) onSaved(); };
+    if(d.estimatedMinutes > 60 && d.status!=='Done' && !d.subtaskPromptDismissed){
+      openSubtaskPromptModal(d.id, finish);
+    } else {
+      closeModal();
+      finish();
+    }
   };
 }
 
@@ -1559,16 +1607,19 @@ function openDefModal(prefillLocation, onSaved){
       }
     }
     const estVal = document.getElementById('dEstimate').value;
-    state.defs.push({
+    const newDef = {
       id:uid(), location:document.getElementById('dLocation').value.trim(), description:desc,
       owner, dueDate, priority:document.getElementById('dPriority').value,
       category: document.getElementById('dCategory').value,
       estimatedMinutes: (owner!=='Trade' && estVal) ? Number(estVal) : null,
       status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
       verifier:null, followUpDate:null, startedAt:null, notes:[]
-    });
-    await sset('defs', state.defs); closeModal();
-    if(onSaved) onSaved(); else render();
+    };
+    state.defs.push(newDef);
+    await sset('defs', state.defs);
+    const finish = ()=>{ if(onSaved) onSaved(); else render(); };
+    if(newDef.estimatedMinutes > 60) openSubtaskPromptModal(newDef.id, finish);
+    else { closeModal(); finish(); }
   };
 }
 

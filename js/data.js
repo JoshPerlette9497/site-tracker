@@ -927,6 +927,41 @@ async function pushDefToNextBusinessDay(defId, fromDay, toDay){
   await sset('defs', state.defs);
 }
 
+/* ---------- subtask breakdown (no AI — Josh names/sizes them himself) ----------
+   Prompted whenever a deficiency's estimate crosses 60 minutes (Add or
+   Edit). Each subtask is a full standalone deficiency (own status/owner/
+   due date/etc.), not a lightweight checklist-style sub-item, so it works
+   with everything else in this file (Suggested Plan, capacity, follow-ups)
+   without any special-casing. parentId is provenance only - nothing reads
+   it yet. The parent is marked Done (no completedDate, since it wasn't
+   actually completed, it was decomposed) so it drops out of every existing
+   status!=='Done' filter with zero new call sites to touch; a note records
+   what happened to it. */
+async function splitDefIntoSubtasks(defId, subtasks){
+  const parent = state.defs.find(x=>x.id===defId);
+  if(!parent || !subtasks.length) return [];
+  const created = subtasks.map(st => ({
+    id: uid(), location: parent.location, description: st.text,
+    owner: parent.owner, dueDate: parent.dueDate, priority: parent.priority,
+    category: parent.category, estimatedMinutes: st.minutes || null,
+    status: 'DO', pushCount: 0, pushReason: '', createdDate: todayISO(),
+    verifier: null, followUpDate: null, startedAt: null, notes: [],
+    parentId: parent.id
+  }));
+  state.defs.push(...created);
+  parent.status = 'Done';
+  parent.notes = parent.notes || [];
+  parent.notes.push({ts: new Date().toISOString(), text: `Split into ${created.length} subtask${created.length===1?'':'s'}: ${created.map(c=>c.description).join(', ')}`});
+  await sset('defs', state.defs);
+  return created;
+}
+async function dismissSubtaskPrompt(defId){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d) return;
+  d.subtaskPromptDismissed = true;
+  await sset('defs', state.defs);
+}
+
 /* ---------- Josh's own forward-looking task schedule (plannedDate) ----------
    A personal commitment - "I'll actually do this Thursday" - separate from
    dueDate/dueOverride (the real deadline). Nothing here is ever set
