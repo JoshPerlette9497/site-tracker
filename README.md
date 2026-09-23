@@ -56,6 +56,13 @@ Before building, an audit found this request's premise ("task-prioritizer system
 
 Verified with a 7-case Node harness (fixed-only regression against the pre-existing algorithm, front-loading with open capacity, flexible correctly skipping a nearly-full fixed day, urgent-vs-relaxed flexible competing for the same day, forced placement when a whole window is full, Suggested-Plan/Capacity consistency, weekend due-date rollover) and a headless browser against both synthetic and the real 230-deficiency dataset (all defaulting to fixed with zero regression, then a mixed scenario with no errors). Add/Edit modals gained a Schedule (Fixed date / Flexible) select; display is identical either way per spec — nothing in `cardForDef` changed.
 
+### Subtask due-date spread
+Audit found the original subtask feature gave every subtask the **same due date as the parent** (no spreading) and the breakdown modal collected no date at all — so Josh's "break a task into one piece per day" workflow required manually editing each subtask's date afterward, and even then a `flexible` subtask could let the auto-scheduler re-clump them the moment a day had spare capacity, undoing a deliberate spread.
+
+Each subtask row in the breakdown modal now has an optional due-date field. `suggestSubtaskDueDates()` (`js/data.js`) fills in whatever's left blank — evenly spread across the business days from today through the parent's real due date (`businessDaysUntil()`, new alongside `businessDaysForward()`), first subtask landing today, last landing on the due date itself. Any date Josh sets by hand is kept as-is; blanks are filled independently by index position in the full spread, not gap-filled around the manual ones — simpler, but means a manual date can occasionally land on the same day as an auto-filled one (verified, not a bug — flagged here as a known simplification). Every subtask from this flow is **always `dueType:'fixed'`**, regardless of what the parent was — deliberate placement, not something the scheduler should be free to optimize away.
+
+Verified with a dedicated Node harness (exact N-days-equals-N-subtasks case with no repeats, uneven spreads, weekend due-date rollover, no-due-date fallback, more subtasks than available days degrading gracefully instead of erroring, manual dates respected alongside auto-filled ones) and a headless browser: 4 subtasks with blank dates landed on 4 distinct business days, all fixed, no errors.
+
 ## Safety walkthrough photo storage (one-time setup required)
 The daily Safety Walkthrough feature (Brief tab) uploads per-checklist-item
 photos to a Supabase Storage bucket named `hazard-photos` (`js/storage.js`:

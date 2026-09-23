@@ -549,6 +549,7 @@ function subtaskRowHtml(n){
   return `<div class="row subtask-row" style="gap:6px; margin-top:6px;">
     <input type="text" class="subtask-text" placeholder="Subtask ${n}" style="flex:1;">
     <select class="subtask-minutes">${estimateOptionsHtml()}</select>
+    <input type="date" class="subtask-due" title="Due date — leave blank to auto-spread">
   </div>`;
 }
 function openSubtaskPromptModal(defId, onDone){
@@ -557,6 +558,7 @@ function openSubtaskPromptModal(defId, onDone){
   showModal(`
     <h2>Break This Down?</h2>
     <div class="helptext" style="margin-bottom:8px;">"${escapeHtml(d.description)}" is estimated at ${d.estimatedMinutes} min. Split it into smaller subtasks?</div>
+    <div class="helptext" style="margin-bottom:8px;">Leave a subtask's date blank to spread it automatically across the days between now and ${d.dueDate?fmtDate(d.dueDate):'the due date'} — one per day where possible, so it doesn't all land on one day just because there's room.</div>
     <div id="subtaskRows">${subtaskRowHtml(1)}</div>
     <button class="btn small ghost" id="addSubtaskRow" style="margin-top:8px;">+ Add Subtask</button>
     <div class="divider"></div>
@@ -570,7 +572,8 @@ function openSubtaskPromptModal(defId, onDone){
   document.getElementById('saveSubtasks').onclick = async()=>{
     const subtasks = [...document.querySelectorAll('.subtask-row')].map(row=>({
       text: row.querySelector('.subtask-text').value.trim(),
-      minutes: Number(row.querySelector('.subtask-minutes').value) || null
+      minutes: Number(row.querySelector('.subtask-minutes').value) || null,
+      dueDate: row.querySelector('.subtask-due').value || null
     })).filter(s=>s.text);
     if(!subtasks.length){ showToast('Add at least one subtask, or tap Not Now.'); return; }
     await splitDefIntoSubtasks(defId, subtasks);
