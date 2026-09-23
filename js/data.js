@@ -423,6 +423,7 @@ async function loadAll(){
   await migrateDefPriority();
   await migrateDefCategory();
   await migrateDefTaskFields_v1();
+  await migrateDefDueType_v1();
   await migrateChecklistMatchPhases();
   await migrateSafetyWalkthroughShape();
   await migratePhaseChecklistRewrite_v1();
@@ -544,6 +545,19 @@ async function migrateDefTaskFields_v1(){
   }
   await sset('defs', state.defs);
   await sset('migrated_def_task_fields_v1', true);
+}
+
+/* fixed = anchored to dueDate exactly like every deficiency already
+   behaves today (no behavior change). flexible = must be done on/before
+   dueDate but the exact day is the system's call, via computeWeekSchedule()
+   below. Every existing item defaults to fixed — flexible is opt-in only,
+   nothing starts auto-moving without Josh explicitly marking it so. */
+async function migrateDefDueType_v1(){
+  let changed = false;
+  for(const d of state.defs){
+    if(!d.dueType){ d.dueType = 'fixed'; changed = true; }
+  }
+  if(changed) await sset('defs', state.defs);
 }
 
 /* Computed, not stored — so editing owner/status through the existing
@@ -787,22 +801,21 @@ const PLAN_DEFAULT_ESTIMATE = 30;
    budget — they're rounds follow-ups, not Josh's own task time. */
 function buildSuggestedPlan(){
   const today = todayISO();
-  const budget = state.dailyAllowanceMinutes || 480;
+  const todayResult = computeWeekSchedule()[0];
 
-  const defCandidates = state.defs
-    .filter(d=>d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=today && isUnitActiveByLocation(d.location))
-    .map(d=>({
-      type:'def', due:d.dueDate, priority:d.priority||'Medium', category:d.category||'Construction',
-      minutes: d.estimatedMinutes || PLAN_DEFAULT_ESTIMATE,
-      ref:d
-    }))
-    .sort((a,b)=>
-      (a.due||'').localeCompare(b.due||'')
-      || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
-      || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
-      || a.minutes-b.minutes // final tiebreak: shortest estimated time first, so a same-day/same-priority
-                             // pile doesn't stall on a long item — clears more, builds momentum
-    );
+  // Josh's own workload for today — fixed items due/overdue today, plus any
+  // flexible item computeWeekSchedule() decided to place today. Both are
+  // shown identically (no fixed/flexible label anywhere), and dragging one
+  // in the queue below works the same for either.
+  const toScheduleItem = d => ({
+    type:'def', due:d.dueDate, priority:d.priority||'Medium', category:d.category||'Construction',
+    minutes: d.estimatedMinutes || PLAN_DEFAULT_ESTIMATE, ref:d
+  });
+  const selectedDefs = [...todayResult.fixedFits, ...todayResult.flexFits].map(toScheduleItem);
+  // Only a fixed item's overflow is "didn't fit today" needing a manual
+  // reschedule — a flexible item that didn't land today simply got placed
+  // on a different day by the scheduler, there's nothing to defer.
+  const deferred = todayResult.fixedPushed.map(toScheduleItem);
 
   // Phase checks are never time-budgeted or deferrable — only Josh's own
   // deficiencies compete for his daily allowance, since a phase check isn't a
@@ -823,24 +836,13 @@ function buildSuggestedPlan(){
     phaseToday.push({type:'phase', due, unit:u, group:g, groupInstance:gi});
   }
 
-  const selectedDefs = [], deferred = [];
-  let used = 0;
-  for(const item of defCandidates){
-    if(selectedDefs.length===0 || used+item.minutes<=budget){
-      selectedDefs.push(item);
-      used += item.minutes;
-    } else {
-      deferred.push(item);
-    }
-  }
-
   const selected = [...selectedDefs, ...phaseToday].sort((a,b)=>(a.due||'').localeCompare(b.due||''));
 
   // Trade-owned deficiencies due today: never budgeted or ranked against Josh's
   // own time, but still worth surfacing so today's rounds/follow-ups are visible.
   const tradeToday = state.defs.filter(d=>d.status!=='Done' && d.owner==='Trade' && d.dueDate===today && isUnitActiveByLocation(d.location));
 
-  return {selected, deferred, tradeToday, used, budget};
+  return {selected, deferred, tradeToday, used: todayResult.used, budget: todayResult.budget};
 }
 
 /* Items parked as WAITING/DELEGATED (or any open item) whose follow-up date
@@ -877,45 +879,60 @@ function businessDaysForward(fromISO, count){
   return days;
 }
 
-/* Projects Josh's own (MY_ACTION) open workload across the next 5 business
-   days against dailyAllowanceMinutes, using the same greedy fill/tiebreak
-   as buildSuggestedPlan. Whatever doesn't fit a day carries into the next
-   one as a push candidate — cascading, so an overloaded Monday can ripple
-   into Tuesday. Read-only: nothing here mutates state or touches a real
-   dueDate — confirmPushToNextBusinessDay() below does that, one item at a
-   time, only when the user confirms the suggestion. Trade/Delegated items
-   are excluded entirely, same as today's budget already excludes them —
-   they were never Josh's time to plan against. */
-function buildCapacityForecast(){
+const WEEK_SCHEDULE_SORT_KEY = (a,b)=>
+  (a.dueDate||'').localeCompare(b.dueDate||'')
+  || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
+  || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
+  || (a.estimatedMinutes||PLAN_DEFAULT_ESTIMATE)-(b.estimatedMinutes||PLAN_DEFAULT_ESTIMATE);
+
+/* Single source of truth for Josh's own workload across the next 5
+   business days — both buildSuggestedPlan() (today only) and
+   buildCapacityForecast() (the whole week) derive from this, so a
+   flexible item can never show up as "today" in one view and a different
+   day in the other. Read-only: nothing here mutates state.
+
+   FIXED items (dueType!=='flexible', the default — no behavior change
+   from before this field existed): anchored to their real dueDate exactly
+   like before. Whatever doesn't fit a day cascades forward as a push
+   candidate — the existing capacity-forecast behavior, untouched.
+
+   FLEXIBLE items: must land on/before dueDate, but which day is this
+   scheduler's call, not anchored to dueDate at all. Processed in
+   due-date-ascending order (the item with the least slack gets first pick
+   of capacity), each one placed on the EARLIEST day in
+   [today, min(dueDate, 5th business day)] that still has room — so a
+   flexible item front-loads into whatever capacity is actually available
+   starting from today, rather than defaulting onto its due date. If
+   nothing in its whole window has room, it's forced onto the day nearest
+   its deadline (may push that day over budget) rather than dropped —
+   dueDate is a hard "must be done by," even for a flexible item.
+   Un-finished flexible items need no separate roll-forward logic: this
+   whole thing recomputes fresh on every render, so a flexible item still
+   open tomorrow just gets re-scheduled fresh alongside everything else,
+   per Josh's spec for how rescheduling should work. Escalating a flexible
+   item once it's within 2 days of its dueDate likewise needs no special
+   code — due-date-ascending processing plus a shrinking window already
+   pushes it toward the front of the queue and the start of its window as
+   the deadline approaches. */
+function computeWeekSchedule(){
   const budget = state.dailyAllowanceMinutes || 480;
   const days = businessDaysForward(todayISO(), 5);
   const lastDay = days[days.length-1];
-  const pool = state.defs.filter(d=>
-    d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=lastDay && isUnitActiveByLocation(d.location)
-  );
-  const sortKey = (a,b)=>
-    (a.dueDate||'').localeCompare(b.dueDate||'')
-    || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
-    || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
-    || (a.estimatedMinutes||PLAN_DEFAULT_ESTIMATE)-(b.estimatedMinutes||PLAN_DEFAULT_ESTIMATE);
+  const openJosh = d => d.status!=='Done' && d.owner==='Josh' && d.dueDate && isUnitActiveByLocation(d.location);
 
-  // Assign every pool item to a forecast day: the first business day whose
-  // date is >= its dueDate. Rolls anything overdue (or due today) into day
-  // 0, and anything due on a weekend forward onto the next business day —
-  // without this, a weekend-due item matches no bucket by exact equality
-  // and silently drops out of the forecast entirely.
+  // ---- fixed: unchanged cascade-from-due-date ----
+  const fixedPool = state.defs.filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType!=='flexible');
   const dayIndexFor = (dueDate) => {
     for(let i=0; i<days.length; i++){ if(dueDate<=days[i]) return i; }
     return days.length-1;
   };
-  const byDay = days.map(()=>[]);
-  for(const item of pool) byDay[dayIndexFor(item.dueDate)].push(item);
+  const fixedByDay = days.map(()=>[]);
+  for(const item of fixedPool) fixedByDay[dayIndexFor(item.dueDate)].push(item);
 
-  const result = [];
+  const week = days.map(day => ({day, budget, used:0, fixedFits:[], fixedPushed:[], fixedOverflow:[], flexFits:[]}));
   let carry = [];
   for(let i=0; i<days.length; i++){
-    const day = days[i];
-    const candidates = [...carry, ...byDay[i]].sort(sortKey);
+    const candidates = [...carry, ...fixedByDay[i]].sort(WEEK_SCHEDULE_SORT_KEY);
     const fits = [], pushed = [];
     let used = 0;
     for(const item of candidates){
@@ -924,10 +941,44 @@ function buildCapacityForecast(){
       else pushed.push(item);
     }
     const isLastDay = i===days.length-1;
-    result.push({day, budget, used, fits, pushed: isLastDay ? [] : pushed, overflow: isLastDay ? pushed : []});
+    week[i].fixedFits = fits;
+    week[i].used = used;
+    week[i].fixedPushed = isLastDay ? [] : pushed;
+    week[i].fixedOverflow = isLastDay ? pushed : [];
     carry = pushed;
   }
-  return result;
+
+  // ---- flexible: earliest-deadline-first, first-fit-from-today ----
+  const flexPool = state.defs
+    .filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType==='flexible')
+    .sort(WEEK_SCHEDULE_SORT_KEY);
+  for(const item of flexPool){
+    const mins = item.estimatedMinutes || PLAN_DEFAULT_ESTIMATE;
+    const windowEndIdx = dayIndexFor(item.dueDate);
+    let placedIdx = -1;
+    for(let i=0; i<=windowEndIdx; i++){
+      if(week[i].used + mins <= budget){ placedIdx = i; break; }
+    }
+    if(placedIdx===-1) placedIdx = windowEndIdx; // couldn't fit anywhere in the window — force onto the day nearest its deadline
+    week[placedIdx].flexFits.push(item);
+    week[placedIdx].used += mins;
+  }
+
+  return week;
+}
+
+/* Thin wrapper over computeWeekSchedule() for the Capacity UI: fixed and
+   flexible items placed on a day are shown together (display never
+   distinguishes them, per spec) but only fixed overflow gets a manual
+   Push/Keep suggestion — a flexible item that doesn't fit reschedules
+   itself automatically on next render, nothing for Josh to confirm. */
+function buildCapacityForecast(){
+  return computeWeekSchedule().map(d => ({
+    day: d.day, budget: d.budget, used: d.used,
+    fits: [...d.fixedFits, ...d.flexFits],
+    pushed: d.fixedPushed,
+    overflow: d.fixedOverflow
+  }));
 }
 
 /* Confirms a capacity-forecast push suggestion: moves the item's real due
@@ -960,7 +1011,7 @@ async function splitDefIntoSubtasks(defId, subtasks){
   if(!parent || !subtasks.length) return [];
   const created = subtasks.map(st => ({
     id: uid(), location: parent.location, description: st.text,
-    owner: parent.owner, dueDate: parent.dueDate, priority: parent.priority,
+    owner: parent.owner, dueDate: parent.dueDate, dueType: parent.dueType||'fixed', priority: parent.priority,
     category: parent.category, estimatedMinutes: st.minutes || null,
     status: 'DO', pushCount: 0, pushReason: '', createdDate: todayISO(),
     verifier: null, followUpDate: null, startedAt: null, notes: [],

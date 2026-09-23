@@ -625,13 +625,18 @@ function openEditDefModal(defId, onSaved){
   showModal(`
     <h2>Edit Deficiency</h2>
     <label>Description</label><textarea id="edDesc" style="min-height:60px;">${escapeHtml(d.description)}</textarea>
+    <label>Owner</label><select id="edOwner">
+      <option value="Trade" ${d.owner==='Trade'?'selected':''}>Trade</option>
+      <option value="Josh" ${d.owner==='Josh'?'selected':''}>Josh</option>
+      <option value="Unassigned" ${(!d.owner||d.owner==='Unassigned')?'selected':''}>Unassigned</option>
+    </select>
     <div class="field-row">
-      <div><label>Owner</label><select id="edOwner">
-        <option value="Trade" ${d.owner==='Trade'?'selected':''}>Trade</option>
-        <option value="Josh" ${d.owner==='Josh'?'selected':''}>Josh</option>
-        <option value="Unassigned" ${(!d.owner||d.owner==='Unassigned')?'selected':''}>Unassigned</option>
-      </select></div>
       <div><label>Due Date</label><input id="edDue" type="date" value="${d.dueDate||''}"></div>
+      <div><label>Schedule</label>
+      <select id="edDueType">
+        <option value="fixed" ${(!d.dueType||d.dueType==='fixed')?'selected':''}>Fixed date</option>
+        <option value="flexible" ${d.dueType==='flexible'?'selected':''}>Flexible (auto-scheduled)</option>
+      </select></div>
     </div>
     <div class="field-row">
       <div><label>Priority</label>
@@ -676,7 +681,12 @@ function openEditDefModal(defId, onSaved){
     if(!desc){ showToast('Description cannot be empty.'); return; }
     const owner = document.getElementById('edOwner').value;
     const dueDate = document.getElementById('edDue').value || null;
-    if(owner==='Josh' && dueDate && !overbookConfirmed){
+    const dueType = document.getElementById('edDueType').value;
+    // The overbook warning only makes sense for a fixed date — it's
+    // protecting against cramming too many hard-anchored items onto one
+    // day, but a flexible item's whole point is that the scheduler spreads
+    // it out automatically, so the same nag here would just be noise.
+    if(owner==='Josh' && dueDate && dueType==='fixed' && !overbookConfirmed){
       const count = joshBookingCount(dueDate, d.id);
       if(count>=2){
         overbookConfirmed = true;
@@ -690,6 +700,7 @@ function openEditDefModal(defId, onSaved){
     d.description = desc;
     d.owner = owner;
     d.dueDate = dueDate;
+    d.dueType = dueType;
     // A planned date is a commitment made around a specific due date; once
     // that due date actually changes, the old plan no longer applies to it.
     if(dueDate !== originalDueDate) d.plannedDate = null;
@@ -1550,7 +1561,7 @@ function openDefImportModal(){
         if(dup){ skipped++; continue; }
         state.defs.push({
           id:uid(), location:r.location||'', description:r.description||'(no description)',
-          owner:r.owner||'Unassigned', status:r.status||'DO', dueDate:r.dueDate||null,
+          owner:r.owner||'Unassigned', status:r.status||'DO', dueDate:r.dueDate||null, dueType:r.dueType||'fixed',
           priority:r.priority||'Medium',
           pushCount:r.pushCount||0, pushReason:r.pushReason||'',
           verifier:r.verifier||null, followUpDate:r.followUpDate||null, startedAt:null, notes:[]
@@ -1595,7 +1606,7 @@ function openCaptureModal(){
     if(!text){ showToast('Jot something down first.'); return; }
     state.defs.push({
       id:uid(), location:document.getElementById('capLocation').value.trim(), description:text,
-      owner:'Unassigned', dueDate:null, priority:'Medium', category:'Construction',
+      owner:'Unassigned', dueDate:null, dueType:'fixed', priority:'Medium', category:'Construction',
       estimatedMinutes:null, status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
       verifier:null, followUpDate:null, startedAt:null, notes:[]
     });
@@ -1615,9 +1626,14 @@ function openDefModal(prefillLocation, onSaved){
     <input id="dLocation" list="unitSuggest" placeholder="e.g. AB17 or AURORA/JUNIPER SITE" value="${escapeHtml(prefillLocation||'')}">
     <datalist id="unitSuggest">${dl}</datalist>
     <label>Description</label><textarea id="dDesc" style="min-height:60px;"></textarea>
+    <label>Owner</label><select id="dOwner"><option>Trade</option><option>Josh</option><option>Unassigned</option></select>
     <div class="field-row">
-      <div><label>Owner</label><select id="dOwner"><option>Trade</option><option>Josh</option><option>Unassigned</option></select></div>
       <div><label>Due Date</label><input id="dDue" type="date"></div>
+      <div><label>Schedule</label>
+      <select id="dDueType">
+        <option value="fixed" selected>Fixed date</option>
+        <option value="flexible">Flexible (auto-scheduled)</option>
+      </select></div>
     </div>
     <div class="field-row">
       <div><label>Priority</label>
@@ -1645,7 +1661,8 @@ function openDefModal(prefillLocation, onSaved){
     if(!desc) return;
     const owner = document.getElementById('dOwner').value;
     const dueDate = document.getElementById('dDue').value || null;
-    if(owner==='Josh' && dueDate && !overbookConfirmed){
+    const dueType = document.getElementById('dDueType').value;
+    if(owner==='Josh' && dueDate && dueType==='fixed' && !overbookConfirmed){
       const count = joshBookingCount(dueDate);
       if(count>=2){
         overbookConfirmed = true;
@@ -1659,7 +1676,7 @@ function openDefModal(prefillLocation, onSaved){
     const estVal = document.getElementById('dEstimate').value;
     const newDef = {
       id:uid(), location:document.getElementById('dLocation').value.trim(), description:desc,
-      owner, dueDate, priority:document.getElementById('dPriority').value,
+      owner, dueDate, dueType, priority:document.getElementById('dPriority').value,
       category: document.getElementById('dCategory').value,
       estimatedMinutes: (owner!=='Trade' && estVal) ? Number(estVal) : null,
       status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
