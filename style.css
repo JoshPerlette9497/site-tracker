@@ -40,6 +40,7 @@
     padding:12px 14px;
     margin-bottom:8px;
   }
+  .now-card .card{border-color:var(--brand-dark); border-width:2px; box-shadow:0 2px 10px rgba(31,92,96,0.15);}
   .card.overdue{border-color:var(--stamp-red); background:#FBEEE8;}
   .card.today{border-color:var(--stamp-amber); background:#FCF3E3;}
   .card.week-urgent{border-color:var(--stamp-red); border-width:2px; background:#FBEEE8;}
@@ -112,6 +113,13 @@
     background:#fff; border-top:2px solid var(--line);
     display:flex; padding-bottom:env(safe-area-inset-bottom);
     box-shadow:0 -2px 10px rgba(0,0,0,0.05);
+  }
+  .capture-fab{
+    position:fixed; right:16px; bottom:calc(78px + env(safe-area-inset-bottom)); z-index:21;
+    width:52px; height:52px; border-radius:50%; border:none;
+    background:var(--brand-dark); color:#fff; font-size:22px; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 4px 14px rgba(0,0,0,0.28); cursor:pointer;
   }
   nav.tabs button{
     flex:1; min-width:0; background:none; border:none; color:var(--ink-dim);

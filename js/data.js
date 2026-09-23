@@ -359,7 +359,7 @@ const DEFAULT_MASTER = [
 
 /* ---------- state ---------- */
 let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[] };
-let activeTab = 'today';
+let activeTab = 'brief';
 let selectedScheduleUnit = null;
 let selectedLogDate = null;
 let expandedGroupIds = new Set();
@@ -422,12 +422,15 @@ async function loadAll(){
   await migrateDefIds();
   await migrateDefPriority();
   await migrateDefCategory();
+  await migrateDefTaskFields_v1();
+  await migrateDefDueType_v1();
   await migrateChecklistMatchPhases();
   await migrateSafetyWalkthroughShape();
   await migratePhaseChecklistRewrite_v1();
   await migratePossessionExactMatch_v1();
   await migrateClearPhaseChecklists_v1();
   await migratePhaseChecklistByPhaseSeed_v1();
+  await migrateClearLegacyMasterChecklist_v1();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -510,6 +513,91 @@ async function migrateDefCategory(){
     if(!d.category){ d.category = 'Construction'; changed = true; }
   }
   if(changed) await sset('defs', state.defs);
+}
+
+/* ---------- unified task model (Phase 1 — deficiencies only) ----------
+   Foundation fields shared with any future "what/where/owner/verifier/
+   due/follow-up/estimate/priority/status/timestamps/notes" task shape.
+   Everything except verifier/followUpDate/startedAt/notes already existed
+   on a deficiency under a different name (what=description, where=location,
+   owner=owner, due_date=dueDate, estimated_duration=estimatedMinutes,
+   created_at/completed_at=createdDate/completedDate) — those are left alone.
+   Phase checklist groups/items are intentionally NOT touched: they stay
+   their own thing, surfaced by currentPhaseChecklistGroup()/
+   buildSuggestedPlan() off round-logging (currentPhase/lastWalkDate), not
+   by anything in this migration. */
+async function migrateDefTaskFields_v1(){
+  const done = await sget('migrated_def_task_fields_v1', false);
+  if(done) return;
+  for(const d of state.defs){
+    if(d.verifier === undefined) d.verifier = null;
+    if(d.followUpDate === undefined) d.followUpDate = null;
+    if(d.startedAt === undefined) d.startedAt = null;
+    if(d.notes === undefined){
+      // One-time enrichment: carry the existing single-string pushReason
+      // into the new append-only notes log as its first historical entry,
+      // without touching pushReason itself (the push/backlog UI still
+      // reads/writes that field exactly as before).
+      d.notes = d.pushReason
+        ? [{ts: d.createdDate || null, text: d.pushReason, source: 'migrated_from_pushReason'}]
+        : [];
+    }
+  }
+  await sset('defs', state.defs);
+  await sset('migrated_def_task_fields_v1', true);
+}
+
+/* fixed = anchored to dueDate exactly like every deficiency already
+   behaves today (no behavior change). flexible = must be done on/before
+   dueDate but the exact day is the system's call, via computeWeekSchedule()
+   below. Every existing item defaults to fixed — flexible is opt-in only,
+   nothing starts auto-moving without Josh explicitly marking it so. */
+async function migrateDefDueType_v1(){
+  let changed = false;
+  for(const d of state.defs){
+    if(!d.dueType){ d.dueType = 'fixed'; changed = true; }
+  }
+  if(changed) await sset('defs', state.defs);
+}
+
+/* Computed, not stored — so editing owner/status through the existing
+   modal (openEditDefModal, markDefDoneWithTimeCheck) can never desync a
+   cached value. Mirrors the read-only-derived pattern already used by
+   dueStatus()/computeRisk()/groupStatus(). MY_ACTION/DELEGATED assumes an
+   open item's owner is Josh or Trade (true of every open deficiency in
+   current data); Unassigned+open falls back to DELEGATED since nothing in
+   the 5-value spec models "nobody assigned yet". */
+function unifiedTaskStatus(d){
+  if(d.status === 'Done') return 'DONE';
+  if(d.status === 'WAIT') return 'WAITING';
+  if(d.owner === 'Josh') return 'MY_ACTION';
+  return 'DELEGATED';
+}
+
+async function setDefVerifier(defId, verifier){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d) return;
+  d.verifier = verifier || null;
+  await sset('defs', state.defs);
+}
+async function setDefFollowUpDate(defId, date){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d) return;
+  d.followUpDate = date || null;
+  await sset('defs', state.defs);
+}
+async function markDefStarted(defId){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d || d.startedAt) return;
+  d.startedAt = new Date().toISOString();
+  await sset('defs', state.defs);
+}
+async function addDefNote(defId, text){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d || !text || !text.trim()) return;
+  d.notes = d.notes || [];
+  d.notes.push({ts: new Date().toISOString(), text: text.trim()});
+  await sset('defs', state.defs);
 }
 
 const CHECKLIST_MATCH_UPDATES = {
@@ -626,6 +714,23 @@ async function migrateClearPhaseChecklists_v1(){
   await sset('migrated_clear_phase_checklists_v1', true);
 }
 
+/* The original master/instances "Ad-hoc Checklist" (2 generic seed items -
+   Backing/Blocking Verification, Pre-Drywall Backing Re-Check - cloned onto
+   every unit at initial setup) predates the real phase-checklist rebuild
+   above and was never replaced with real content; it just kept showing the
+   same placeholder pair on every Unit Detail page. Clears the data only -
+   the Checklist Master tab (addMasterItem/openMasterModal) stays fully
+   functional for a real item added later. Runs once, gated below. */
+async function migrateClearLegacyMasterChecklist_v1(){
+  const done = await sget('migrated_clear_legacy_master_checklist_v1', false);
+  if(done) return;
+  state.master = [];
+  state.instances = [];
+  await sset('master', state.master);
+  await sset('instances', state.instances);
+  await sset('migrated_clear_legacy_master_checklist_v1', true);
+}
+
 /* Loads Josh's "By Phase" rebuild (22 broad QC groups, replacing the empty
    library the clear migration above left behind) and creates an instance of
    each on every active unit. Runs once, gated by the flag below - future
@@ -696,20 +801,21 @@ const PLAN_DEFAULT_ESTIMATE = 30;
    budget — they're rounds follow-ups, not Josh's own task time. */
 function buildSuggestedPlan(){
   const today = todayISO();
-  const budget = state.dailyAllowanceMinutes || 480;
+  const todayResult = computeWeekSchedule()[0];
 
-  const defCandidates = state.defs
-    .filter(d=>d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=today && isUnitActiveByLocation(d.location))
-    .map(d=>({
-      type:'def', due:d.dueDate, priority:d.priority||'Medium', category:d.category||'Construction',
-      minutes: d.estimatedMinutes || PLAN_DEFAULT_ESTIMATE,
-      ref:d
-    }))
-    .sort((a,b)=>
-      (a.due||'').localeCompare(b.due||'')
-      || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
-      || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
-    );
+  // Josh's own workload for today — fixed items due/overdue today, plus any
+  // flexible item computeWeekSchedule() decided to place today. Both are
+  // shown identically (no fixed/flexible label anywhere), and dragging one
+  // in the queue below works the same for either.
+  const toScheduleItem = d => ({
+    type:'def', due:d.dueDate, priority:d.priority||'Medium', category:d.category||'Construction',
+    minutes: d.estimatedMinutes || PLAN_DEFAULT_ESTIMATE, ref:d
+  });
+  const selectedDefs = [...todayResult.fixedFits, ...todayResult.flexFits].map(toScheduleItem);
+  // Only a fixed item's overflow is "didn't fit today" needing a manual
+  // reschedule — a flexible item that didn't land today simply got placed
+  // on a different day by the scheduler, there's nothing to defer.
+  const deferred = todayResult.fixedPushed.map(toScheduleItem);
 
   // Phase checks are never time-budgeted or deferrable — only Josh's own
   // deficiencies compete for his daily allowance, since a phase check isn't a
@@ -730,24 +836,199 @@ function buildSuggestedPlan(){
     phaseToday.push({type:'phase', due, unit:u, group:g, groupInstance:gi});
   }
 
-  const selectedDefs = [], deferred = [];
-  let used = 0;
-  for(const item of defCandidates){
-    if(selectedDefs.length===0 || used+item.minutes<=budget){
-      selectedDefs.push(item);
-      used += item.minutes;
-    } else {
-      deferred.push(item);
-    }
-  }
-
   const selected = [...selectedDefs, ...phaseToday].sort((a,b)=>(a.due||'').localeCompare(b.due||''));
 
   // Trade-owned deficiencies due today: never budgeted or ranked against Josh's
   // own time, but still worth surfacing so today's rounds/follow-ups are visible.
   const tradeToday = state.defs.filter(d=>d.status!=='Done' && d.owner==='Trade' && d.dueDate===today && isUnitActiveByLocation(d.location));
 
-  return {selected, deferred, tradeToday, used, budget};
+  return {selected, deferred, tradeToday, used: todayResult.used, budget: todayResult.budget};
+}
+
+/* Items parked as WAITING/DELEGATED (or any open item) whose follow-up date
+   has arrived — "time to check on this," not a deadline. Feeds the NOW
+   section on Brief as a fallback when nothing is scheduled in today's
+   Suggested Plan queue. Sorted the same way as the plan itself. */
+function followUpsDue(){
+  const today = todayISO();
+  return state.defs
+    .filter(d=>d.status!=='Done' && d.followUpDate && d.followUpDate<=today && isUnitActiveByLocation(d.location))
+    .sort((a,b)=>
+      (a.followUpDate||'').localeCompare(b.followUpDate||'')
+      || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
+      || (a.estimatedMinutes||PLAN_DEFAULT_ESTIMATE)-(b.estimatedMinutes||PLAN_DEFAULT_ESTIMATE)
+    );
+}
+
+/* ---------- capacity planning (next 5 business days) ---------- */
+function nextBusinessDay(iso){
+  let d = addDays(iso, 1);
+  let dow = new Date(d+'T00:00:00').getDay();
+  while(dow===0 || dow===6){ d = addDays(d, 1); dow = new Date(d+'T00:00:00').getDay(); }
+  return d;
+}
+/* Mon-Fri only, no weekends — starts on fromISO itself if it's a business
+   day (rolls forward to Monday first if not), then walks forward count-1
+   more business days. */
+function businessDaysForward(fromISO, count){
+  let d = fromISO;
+  let dow = new Date(d+'T00:00:00').getDay();
+  while(dow===0 || dow===6){ d = addDays(d, 1); dow = new Date(d+'T00:00:00').getDay(); }
+  const days = [d];
+  while(days.length < count){ d = nextBusinessDay(d); days.push(d); }
+  return days;
+}
+
+const WEEK_SCHEDULE_SORT_KEY = (a,b)=>
+  (a.dueDate||'').localeCompare(b.dueDate||'')
+  || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
+  || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
+  || (a.estimatedMinutes||PLAN_DEFAULT_ESTIMATE)-(b.estimatedMinutes||PLAN_DEFAULT_ESTIMATE);
+
+/* Single source of truth for Josh's own workload across the next 5
+   business days — both buildSuggestedPlan() (today only) and
+   buildCapacityForecast() (the whole week) derive from this, so a
+   flexible item can never show up as "today" in one view and a different
+   day in the other. Read-only: nothing here mutates state.
+
+   FIXED items (dueType!=='flexible', the default — no behavior change
+   from before this field existed): anchored to their real dueDate exactly
+   like before. Whatever doesn't fit a day cascades forward as a push
+   candidate — the existing capacity-forecast behavior, untouched.
+
+   FLEXIBLE items: must land on/before dueDate, but which day is this
+   scheduler's call, not anchored to dueDate at all. Processed in
+   due-date-ascending order (the item with the least slack gets first pick
+   of capacity), each one placed on the EARLIEST day in
+   [today, min(dueDate, 5th business day)] that still has room — so a
+   flexible item front-loads into whatever capacity is actually available
+   starting from today, rather than defaulting onto its due date. If
+   nothing in its whole window has room, it's forced onto the day nearest
+   its deadline (may push that day over budget) rather than dropped —
+   dueDate is a hard "must be done by," even for a flexible item.
+   Un-finished flexible items need no separate roll-forward logic: this
+   whole thing recomputes fresh on every render, so a flexible item still
+   open tomorrow just gets re-scheduled fresh alongside everything else,
+   per Josh's spec for how rescheduling should work. Escalating a flexible
+   item once it's within 2 days of its dueDate likewise needs no special
+   code — due-date-ascending processing plus a shrinking window already
+   pushes it toward the front of the queue and the start of its window as
+   the deadline approaches. */
+function computeWeekSchedule(){
+  const budget = state.dailyAllowanceMinutes || 480;
+  const days = businessDaysForward(todayISO(), 5);
+  const lastDay = days[days.length-1];
+  const openJosh = d => d.status!=='Done' && d.owner==='Josh' && d.dueDate && isUnitActiveByLocation(d.location);
+
+  // ---- fixed: unchanged cascade-from-due-date ----
+  const fixedPool = state.defs.filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType!=='flexible');
+  const dayIndexFor = (dueDate) => {
+    for(let i=0; i<days.length; i++){ if(dueDate<=days[i]) return i; }
+    return days.length-1;
+  };
+  const fixedByDay = days.map(()=>[]);
+  for(const item of fixedPool) fixedByDay[dayIndexFor(item.dueDate)].push(item);
+
+  const week = days.map(day => ({day, budget, used:0, fixedFits:[], fixedPushed:[], fixedOverflow:[], flexFits:[]}));
+  let carry = [];
+  for(let i=0; i<days.length; i++){
+    const candidates = [...carry, ...fixedByDay[i]].sort(WEEK_SCHEDULE_SORT_KEY);
+    const fits = [], pushed = [];
+    let used = 0;
+    for(const item of candidates){
+      const mins = item.estimatedMinutes || PLAN_DEFAULT_ESTIMATE;
+      if(fits.length===0 || used+mins<=budget){ fits.push(item); used += mins; }
+      else pushed.push(item);
+    }
+    const isLastDay = i===days.length-1;
+    week[i].fixedFits = fits;
+    week[i].used = used;
+    week[i].fixedPushed = isLastDay ? [] : pushed;
+    week[i].fixedOverflow = isLastDay ? pushed : [];
+    carry = pushed;
+  }
+
+  // ---- flexible: earliest-deadline-first, first-fit-from-today ----
+  const flexPool = state.defs
+    .filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType==='flexible')
+    .sort(WEEK_SCHEDULE_SORT_KEY);
+  for(const item of flexPool){
+    const mins = item.estimatedMinutes || PLAN_DEFAULT_ESTIMATE;
+    const windowEndIdx = dayIndexFor(item.dueDate);
+    let placedIdx = -1;
+    for(let i=0; i<=windowEndIdx; i++){
+      if(week[i].used + mins <= budget){ placedIdx = i; break; }
+    }
+    if(placedIdx===-1) placedIdx = windowEndIdx; // couldn't fit anywhere in the window — force onto the day nearest its deadline
+    week[placedIdx].flexFits.push(item);
+    week[placedIdx].used += mins;
+  }
+
+  return week;
+}
+
+/* Thin wrapper over computeWeekSchedule() for the Capacity UI: fixed and
+   flexible items placed on a day are shown together (display never
+   distinguishes them, per spec) but only fixed overflow gets a manual
+   Push/Keep suggestion — a flexible item that doesn't fit reschedules
+   itself automatically on next render, nothing for Josh to confirm. */
+function buildCapacityForecast(){
+  return computeWeekSchedule().map(d => ({
+    day: d.day, budget: d.budget, used: d.used,
+    fits: [...d.fixedFits, ...d.flexFits],
+    pushed: d.fixedPushed,
+    overflow: d.fixedOverflow
+  }));
+}
+
+/* Confirms a capacity-forecast push suggestion: moves the item's real due
+   date forward one business day, tracked the same way a checklist
+   instance's Push button already tracks a backlog push (pushCount/
+   pushReason) — deficiencies had those fields since the original import
+   but no UI ever wrote to them. One item, one day, at a time; the
+   forecast recomputes fresh from the new dueDate on next render. */
+async function pushDefToNextBusinessDay(defId, fromDay, toDay){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d) return;
+  d.pushCount = (d.pushCount||0)+1;
+  d.pushReason = `capacity: bumped from ${fromDay} to ${toDay} — day was full`;
+  d.dueDate = toDay;
+  await sset('defs', state.defs);
+}
+
+/* ---------- subtask breakdown (no AI — Josh names/sizes them himself) ----------
+   Prompted whenever a deficiency's estimate crosses 60 minutes (Add or
+   Edit). Each subtask is a full standalone deficiency (own status/owner/
+   due date/etc.), not a lightweight checklist-style sub-item, so it works
+   with everything else in this file (Suggested Plan, capacity, follow-ups)
+   without any special-casing. parentId is provenance only - nothing reads
+   it yet. The parent is marked Done (no completedDate, since it wasn't
+   actually completed, it was decomposed) so it drops out of every existing
+   status!=='Done' filter with zero new call sites to touch; a note records
+   what happened to it. */
+async function splitDefIntoSubtasks(defId, subtasks){
+  const parent = state.defs.find(x=>x.id===defId);
+  if(!parent || !subtasks.length) return [];
+  const created = subtasks.map(st => ({
+    id: uid(), location: parent.location, description: st.text,
+    owner: parent.owner, dueDate: parent.dueDate, dueType: parent.dueType||'fixed', priority: parent.priority,
+    category: parent.category, estimatedMinutes: st.minutes || null,
+    status: 'DO', pushCount: 0, pushReason: '', createdDate: todayISO(),
+    verifier: null, followUpDate: null, startedAt: null, notes: [],
+    parentId: parent.id
+  }));
+  state.defs.push(...created);
+  parent.status = 'Done';
+  parent.notes = parent.notes || [];
+  parent.notes.push({ts: new Date().toISOString(), text: `Split into ${created.length} subtask${created.length===1?'':'s'}: ${created.map(c=>c.description).join(', ')}`});
+  await sset('defs', state.defs);
+  return created;
+}
+async function dismissSubtaskPrompt(defId){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d) return;
+  d.subtaskPromptDismissed = true;
+  await sset('defs', state.defs);
 }
 
 /* ---------- Josh's own forward-looking task schedule (plannedDate) ----------

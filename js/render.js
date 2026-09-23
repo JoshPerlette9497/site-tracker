@@ -9,8 +9,7 @@ function setHeader(){
 
 function render(){
   const scrollY = window.scrollY;
-  if(activeTab==='today') renderToday();
-  else if(activeTab==='brief') renderBrief();
+  if(activeTab==='brief') renderBrief();
   else if(activeTab==='units') renderUnits();
   else if(activeTab==='master') renderMaster();
   else if(activeTab==='defs') renderDefs();
@@ -18,6 +17,26 @@ function render(){
   else if(activeTab==='schedule') renderSchedule();
   else if(activeTab==='sync') renderSync();
   window.scrollTo(0, scrollY);
+}
+
+/* Distinct top section on Brief — always the same place to look for "what's
+   next." Just a highlighted preview of the Suggested Plan queue's own first
+   item (below, unchanged), so reordering that queue moves NOW with it
+   instead of the two drifting apart. Falls back to the oldest overdue
+   follow-up when nothing is scheduled — "go check on this" rather than
+   nothing at all. */
+function nowSection(orderedPlan){
+  const top = orderedPlan[0];
+  let inner;
+  if(top){
+    inner = top.type==='def'
+      ? cardForDef(top.ref, dueStatus(top.ref.dueDate, top.ref.status))
+      : planPhaseCard(top);
+  } else {
+    const fu = followUpsDue()[0];
+    inner = fu ? cardForDef(fu, dueStatus(fu.dueDate, fu.status)) : `<div class="empty">Nothing scheduled — Suggested Plan is clear.</div>`;
+  }
+  return `<div class="section-title">Now</div><div class="now-card">${inner}</div>`;
 }
 
 function renderBrief(){
@@ -29,6 +48,7 @@ function renderBrief(){
   const tradeDueSoon = openDefs.filter(d=>d.owner==='Trade' && d.dueDate && d.dueDate<=tomorrow);
   const tradeOpenNoDue = openDefs.filter(d=>d.owner==='Trade' && !d.dueDate);
   const backlogCount = openDefs.filter(d=>(d.pushCount||0)>=1).length;
+  const needsTriageCount = openDefs.filter(d=>!d.dueDate).length;
 
   const checklistOverdue = [], checklistDueToday = [], checklistCompletedToday = [];
   for(const inst of state.instances){
@@ -42,7 +62,11 @@ function renderBrief(){
   const finishingSoon = state.schedule.filter(e=>e.finishDate && e.finishDate>=today && e.finishDate<=tomorrow)
     .sort((a,b)=>(a.finishDate||'').localeCompare(b.finishDate||''));
 
+  const orderedPlan = applyManualOrder(plan.selected);
+
   let html = `<div class="section-title">Daily Brief — ${fmtDate(today)}</div>`;
+
+  html += nowSection(orderedPlan);
 
   html += renderSafetyWalkthroughSection();
 
@@ -50,7 +74,7 @@ function renderBrief(){
   if(plan.selected.length===0){
     html += `<div class="empty">Nothing of yours due or overdue today.</div>`;
   } else {
-    html += `<div id="planScheduleList">` + applyManualOrder(plan.selected).map(item => draggableScheduleItem(item, item.type==='def'
+    html += `<div id="planScheduleList">` + orderedPlan.map(item => draggableScheduleItem(item, item.type==='def'
       ? cardForDef(item.ref, dueStatus(item.ref.dueDate, item.ref.status))
       : planPhaseCard(item)
     )).join('') + `</div>`;
@@ -60,6 +84,8 @@ function renderBrief(){
     html += plan.deferred.map(item=>deferredItemRow(item)).join('');
   }
   html += renderUpcomingScheduleSection();
+
+  html += capacitySection();
 
   html += `<div class="section-title">Trade — Due Today/Tomorrow<span class="pill">${tradeDueSoon.length}</span></div>`;
   html += tradeDueSoon.length ? tradeDueSoon.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">None due soon.</div>`;
@@ -81,13 +107,25 @@ function renderBrief(){
     <div class="item-meta"><b>${checklistCompletedToday.length}</b> completed today</div>
   </div>`;
 
+  if(needsTriageCount>0){
+    html += `<div class="empty" style="margin-top:8px;"><a href="#" id="needsTriageLink">Needs triage (no due date yet): ${needsTriageCount}</a></div>`;
+  }
   html += `<div class="empty" style="margin-top:8px;">Backlog (pushed items): ${backlogCount}</div>`;
 
   app.innerHTML = html;
   wireCardActions();
   wireScheduleActions();
+  wireCapacityActions();
   wireDragReorder();
   wireSafetyWalkthroughActions();
+  const triageLink = document.getElementById('needsTriageLink');
+  if(triageLink) triageLink.onclick = (e)=>{
+    e.preventDefault();
+    activeTab = 'defs';
+    defsFilterTab = 'undated';
+    document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('active', x.dataset.tab==='defs'));
+    render();
+  };
 }
 
 /* Wraps a scheduled-plan card with a drag handle so Josh can reorder today's
@@ -397,48 +435,49 @@ function wireScheduleActions(){
   });
 }
 
-function renderToday(){
-  const rows = state.instances.map(inst=>{
-    const {m,u,due} = instanceInfo(inst);
-    if(!m||!u||!u.active) return null;
-    return {inst,m,u,due,st:dueStatus(due, inst.status)};
-  }).filter(Boolean).filter(r=>r.st==='overdue'||r.st==='today');
-
-  const defRows = state.defs.filter(d=>d.status!=='Done' && isUnitActiveByLocation(d.location)).map(d=>{
-    return {d,st:dueStatus(d.dueDate, d.status)};
-  }).filter(r=>r.st==='overdue'||r.st==='today');
-
-  rows.sort((a,b)=> (a.due||'').localeCompare(b.due||''));
-
-  let html = `<div class="section-title">Checklist — Due Today / Overdue<span class="pill">${rows.length}</span></div>`;
-  if(rows.length===0) html += `<div class="empty">Nothing due today or overdue. Nice.</div>`;
-  for(const r of rows){
-    html += cardForInstance(r.inst, r.m, r.u, r.due, r.st);
+/* Next 5 business days: Josh's own workload vs. his daily budget, with
+   push suggestions (shortest-time-first, same tiebreak as Suggested Plan)
+   for whatever doesn't fit a day. Suggestions are read-only until
+   confirmed via the Push button — nothing here touches a real due date. */
+function capacitySection(){
+  const forecast = buildCapacityForecast();
+  let html = `<div class="section-title" style="margin-top:14px;">Capacity — Next 5 Business Days</div>`;
+  for(const day of forecast){
+    const over = day.used > day.budget;
+    const toSuggest = [...day.pushed, ...(day.overflow||[])];
+    html += `<div class="card${over?' overdue':''}">
+      <div class="row">
+        <div class="item-name">${fmtDate(day.day)}</div>
+        <span class="stamp ${over?'overdue':'done'}">${day.used}/${day.budget}m</span>
+      </div>`;
+    if(toSuggest.length){
+      const nextDay = nextBusinessDay(day.day);
+      html += `<div class="item-meta" style="margin-top:6px;">Won't fit — suggest pushing to ${fmtDate(nextDay)}:</div>`;
+      for(const item of toSuggest){
+        html += `<div class="row" data-capacity-def="${item.id}" data-capacity-today="${day.day}" data-capacity-next="${nextDay}" style="margin-top:6px; align-items:center; gap:6px;">
+          <div style="flex:1; min-width:0;">
+            <div class="item-name" style="font-size:13px;">${escapeHtml(item.description)}</div>
+            <div class="item-meta">${escapeHtml(item.location||'—')} · ${item.estimatedMinutes||PLAN_DEFAULT_ESTIMATE}m${priorityTag(item)}</div>
+          </div>
+          <button class="btn small capacity-push">Push</button>
+          <button class="btn small ghost capacity-deny">Keep</button>
+        </div>`;
+      }
+    }
+    html += `</div>`;
   }
-
-  html += `<div class="section-title">Deficiencies — Due Today / Overdue<span class="pill">${defRows.length}</span></div>`;
-  if(defRows.length===0) html += `<div class="empty">No deficiencies due.</div>`;
-  for(const r of defRows){
-    html += cardForDef(r.d, r.st);
-  }
-  app.innerHTML = html;
-  wireCardActions();
+  return html;
 }
-
-function cardForInstance(inst, m, u, due, st){
-  return `<div class="card ${st}" data-inst="${inst.id}">
-    <div class="row">
-      <div>
-        <div class="item-name">${escapeHtml(m.name)}</div>
-        <div class="item-meta">${escapeHtml(u.name)} · ${escapeHtml(m.milestone)}${m.area?' · '+escapeHtml(m.area):''} · due ${fmtDate(due)}</div>
-      </div>
-      <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
-    </div>
-    <div class="row" style="margin-top:10px; gap:6px;">
-      <button class="btn small done-btn act-done">Mark Done</button>
-      <button class="btn small ghost act-push">Push</button>
-    </div>
-  </div>`;
+function wireCapacityActions(){
+  document.querySelectorAll('.capacity-push').forEach(b=>b.onclick=async(e)=>{
+    const row = e.target.closest('[data-capacity-def]');
+    await pushDefToNextBusinessDay(row.dataset.capacityDef, row.dataset.capacityToday, row.dataset.capacityNext);
+    showToast('Pushed to '+fmtDate(row.dataset.capacityNext)+'.');
+    render();
+  });
+  document.querySelectorAll('.capacity-deny').forEach(b=>b.onclick=(e)=>{
+    e.target.closest('[data-capacity-def]').remove();
+  });
 }
 
 function planPhaseCard(item){
@@ -467,18 +506,31 @@ function categoryTag(d){
 }
 
 function cardForDef(d, st){
+  const startedMeta = d.startedAt ? ' · started '+new Date(d.startedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}) : '';
+  const verifierMeta = d.verifier ? ' · verify: '+escapeHtml(d.verifier) : '';
   return `<div class="card ${st} def-card" data-def="${d.id}" style="cursor:pointer;">
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(d.description)}</div>
-        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${priorityTag(d)}${categoryTag(d)}</div>
+        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${d.followUpDate?' · follow up '+fmtDate(d.followUpDate):''}${startedMeta}${verifierMeta}${priorityTag(d)}${categoryTag(d)}</div>
       </div>
       <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>
     <div class="row" style="margin-top:10px; gap:6px;">
+      ${(st!=='done' && !d.startedAt) ? '<button class="btn small ghost act-start">Start</button>' : ''}
       <button class="btn small done-btn defact-done">Mark Done</button>
     </div>
   </div>`;
+}
+
+/* Append-only notes log, newest first. ts is either a full ISO datetime
+   (addDefNote) or a plain YYYY-MM-DD date (migrated from a legacy
+   pushReason) — both slice cleanly to the date fmtDate expects. */
+function notesListHtml(notes){
+  if(!notes || !notes.length) return `<div class="helptext" style="opacity:0.6;">No notes yet.</div>`;
+  return notes.slice().reverse().map(n=>
+    `<div class="item-meta" style="margin-bottom:4px;">${n.ts?fmtDate(n.ts.slice(0,10))+' — ':''}${escapeHtml(n.text)}</div>`
+  ).join('');
 }
 
 const ESTIMATE_MINUTE_OPTIONS = [5, 10, 30, 60, 120];
@@ -487,6 +539,50 @@ function estimateOptionsHtml(selected){
   return `<option value="">—</option>` + ESTIMATE_MINUTE_OPTIONS.map(m=>
     `<option value="${m}" ${sel===m?'selected':''}>${m} min</option>`
   ).join('');
+}
+
+/* Fires after saving a deficiency (Add or Edit) whose estimate is over an
+   hour — a one-shot ask, not a nag: "Not Now" sets subtaskPromptDismissed
+   so it never re-asks for this same item again. No AI involved by design —
+   Josh names and sizes the subtasks himself, on the spot. */
+function subtaskRowHtml(n){
+  return `<div class="row subtask-row" style="gap:6px; margin-top:6px;">
+    <input type="text" class="subtask-text" placeholder="Subtask ${n}" style="flex:1;">
+    <select class="subtask-minutes">${estimateOptionsHtml()}</select>
+  </div>`;
+}
+function openSubtaskPromptModal(defId, onDone){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d){ onDone(); return; }
+  showModal(`
+    <h2>Break This Down?</h2>
+    <div class="helptext" style="margin-bottom:8px;">"${escapeHtml(d.description)}" is estimated at ${d.estimatedMinutes} min. Split it into smaller subtasks?</div>
+    <div id="subtaskRows">${subtaskRowHtml(1)}</div>
+    <button class="btn small ghost" id="addSubtaskRow" style="margin-top:8px;">+ Add Subtask</button>
+    <div class="divider"></div>
+    <button class="btn" id="saveSubtasks" style="width:100%;">Create Subtasks</button>
+    <button class="btn small ghost" id="skipSubtasks" style="width:100%; margin-top:6px;">Not Now</button>
+  `);
+  document.getElementById('addSubtaskRow').onclick = ()=>{
+    const rows = document.getElementById('subtaskRows');
+    rows.insertAdjacentHTML('beforeend', subtaskRowHtml(rows.children.length+1));
+  };
+  document.getElementById('saveSubtasks').onclick = async()=>{
+    const subtasks = [...document.querySelectorAll('.subtask-row')].map(row=>({
+      text: row.querySelector('.subtask-text').value.trim(),
+      minutes: Number(row.querySelector('.subtask-minutes').value) || null
+    })).filter(s=>s.text);
+    if(!subtasks.length){ showToast('Add at least one subtask, or tap Not Now.'); return; }
+    await splitDefIntoSubtasks(defId, subtasks);
+    closeModal();
+    showToast(`Split into ${subtasks.length} subtask${subtasks.length===1?'':'s'}.`);
+    onDone();
+  };
+  document.getElementById('skipSubtasks').onclick = async()=>{
+    await dismissSubtaskPrompt(defId);
+    closeModal();
+    onDone();
+  };
 }
 
 /* Marks a deficiency done. Josh-owned items get asked how long it actually
@@ -529,13 +625,18 @@ function openEditDefModal(defId, onSaved){
   showModal(`
     <h2>Edit Deficiency</h2>
     <label>Description</label><textarea id="edDesc" style="min-height:60px;">${escapeHtml(d.description)}</textarea>
+    <label>Owner</label><select id="edOwner">
+      <option value="Trade" ${d.owner==='Trade'?'selected':''}>Trade</option>
+      <option value="Josh" ${d.owner==='Josh'?'selected':''}>Josh</option>
+      <option value="Unassigned" ${(!d.owner||d.owner==='Unassigned')?'selected':''}>Unassigned</option>
+    </select>
     <div class="field-row">
-      <div><label>Owner</label><select id="edOwner">
-        <option value="Trade" ${d.owner==='Trade'?'selected':''}>Trade</option>
-        <option value="Josh" ${d.owner==='Josh'?'selected':''}>Josh</option>
-        <option value="Unassigned" ${(!d.owner||d.owner==='Unassigned')?'selected':''}>Unassigned</option>
-      </select></div>
       <div><label>Due Date</label><input id="edDue" type="date" value="${d.dueDate||''}"></div>
+      <div><label>Schedule</label>
+      <select id="edDueType">
+        <option value="fixed" ${(!d.dueType||d.dueType==='fixed')?'selected':''}>Fixed date</option>
+        <option value="flexible" ${d.dueType==='flexible'?'selected':''}>Flexible (auto-scheduled)</option>
+      </select></div>
     </div>
     <div class="field-row">
       <div><label>Priority</label>
@@ -551,6 +652,16 @@ function openEditDefModal(defId, onSaved){
       <option value="Construction" ${(!d.category||d.category==='Construction')?'selected':''}>Construction</option>
       <option value="Safety" ${d.category==='Safety'?'selected':''}>Safety</option>
     </select>
+    <div class="field-row" style="margin-top:8px;">
+      <div><label>Verifier</label><input id="edVerifier" type="text" placeholder="Who confirms it's done?" value="${escapeHtml(d.verifier||'')}"></div>
+      <div><label>Follow-up Date</label><input id="edFollowUp" type="date" value="${d.followUpDate||''}"></div>
+    </div>
+    <label style="margin-top:8px; display:block;">Notes</label>
+    <div id="edNotesList" style="max-height:120px; overflow-y:auto; margin-bottom:6px;">${notesListHtml(d.notes)}</div>
+    <div class="row" style="gap:6px;">
+      <input id="edNewNote" type="text" placeholder="Add a note…" style="flex:1;">
+      <button class="btn small" id="edAddNote">Add</button>
+    </div>
     <div id="edOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="edSave" style="width:100%;">Save Changes</button>
@@ -558,12 +669,24 @@ function openEditDefModal(defId, onSaved){
   document.getElementById('edOwner').onchange = (e)=>{
     document.getElementById('edEstimateWrap').style.display = e.target.value==='Trade' ? 'none' : '';
   };
+  document.getElementById('edAddNote').onclick = async()=>{
+    const text = document.getElementById('edNewNote').value.trim();
+    if(!text) return;
+    await addDefNote(d.id, text);
+    document.getElementById('edNewNote').value = '';
+    document.getElementById('edNotesList').innerHTML = notesListHtml(d.notes);
+  };
   document.getElementById('edSave').onclick = async()=>{
     const desc = document.getElementById('edDesc').value.trim();
     if(!desc){ showToast('Description cannot be empty.'); return; }
     const owner = document.getElementById('edOwner').value;
     const dueDate = document.getElementById('edDue').value || null;
-    if(owner==='Josh' && dueDate && !overbookConfirmed){
+    const dueType = document.getElementById('edDueType').value;
+    // The overbook warning only makes sense for a fixed date — it's
+    // protecting against cramming too many hard-anchored items onto one
+    // day, but a flexible item's whole point is that the scheduler spreads
+    // it out automatically, so the same nag here would just be noise.
+    if(owner==='Josh' && dueDate && dueType==='fixed' && !overbookConfirmed){
       const count = joshBookingCount(dueDate, d.id);
       if(count>=2){
         overbookConfirmed = true;
@@ -577,17 +700,24 @@ function openEditDefModal(defId, onSaved){
     d.description = desc;
     d.owner = owner;
     d.dueDate = dueDate;
+    d.dueType = dueType;
     // A planned date is a commitment made around a specific due date; once
     // that due date actually changes, the old plan no longer applies to it.
     if(dueDate !== originalDueDate) d.plannedDate = null;
     d.priority = document.getElementById('edPriority').value;
     d.category = document.getElementById('edCategory').value;
+    d.verifier = document.getElementById('edVerifier').value.trim() || null;
+    d.followUpDate = document.getElementById('edFollowUp').value || null;
     const estVal = document.getElementById('edEstimate').value;
     d.estimatedMinutes = (owner!=='Trade' && estVal) ? Number(estVal) : null;
     await sset('defs', state.defs);
-    closeModal();
-    showToast('Deficiency updated.');
-    if(onSaved) onSaved();
+    const finish = ()=>{ showToast('Deficiency updated.'); if(onSaved) onSaved(); };
+    if(d.estimatedMinutes > 60 && d.status!=='Done' && !d.subtaskPromptDismissed){
+      openSubtaskPromptModal(d.id, finish);
+    } else {
+      closeModal();
+      finish();
+    }
   };
 }
 
@@ -611,6 +741,12 @@ function wireCardActions(){
     e.stopPropagation();
     const id = e.target.closest('[data-def]').dataset.def;
     markDefDoneWithTimeCheck(id, render);
+  });
+  document.querySelectorAll('.act-start').forEach(b=>b.onclick=async(e)=>{
+    e.stopPropagation();
+    const id = e.target.closest('[data-def]').dataset.def;
+    await markDefStarted(id);
+    render();
   });
   document.querySelectorAll('.def-card').forEach(card=>card.onclick=(e)=>{
     if(e.target.closest('button')) return;
@@ -1425,9 +1561,10 @@ function openDefImportModal(){
         if(dup){ skipped++; continue; }
         state.defs.push({
           id:uid(), location:r.location||'', description:r.description||'(no description)',
-          owner:r.owner||'Unassigned', status:r.status||'DO', dueDate:r.dueDate||null,
+          owner:r.owner||'Unassigned', status:r.status||'DO', dueDate:r.dueDate||null, dueType:r.dueType||'fixed',
           priority:r.priority||'Medium',
-          pushCount:r.pushCount||0, pushReason:r.pushReason||''
+          pushCount:r.pushCount||0, pushReason:r.pushReason||'',
+          verifier:r.verifier||null, followUpDate:r.followUpDate||null, startedAt:null, notes:[]
         });
         added++;
       }
@@ -1442,6 +1579,44 @@ function joshBookingCount(dueDate, excludeId){
   return state.defs.filter(d=>d.id!==excludeId && d.owner==='Josh' && d.dueDate===dueDate && d.status!=='Done').length;
 }
 
+/* Quick capture — the deliberately-skipped-until-now "capture button" from
+   the original roadmap. One field, no decisions forced up front: no
+   location/owner/due date/priority/estimate required. Everything jotted
+   here lands as owner Unassigned with no due date, so it surfaces exactly
+   where the app's existing (pre-dating this work) triage filters already
+   look for it — Deficiencies → No Date, and Missing Estimate — without
+   needing any new filter built for it. */
+function openCaptureModal(){
+  const dl = state.units.map(u=>`<option value="${escapeHtml(u.name)}">`).join('');
+  showModal(`
+    <h2>Capture</h2>
+    <div class="helptext" style="margin-bottom:8px;">Jot it down now — nothing else required. Find it later under Deficiencies → No Date (or Missing Estimate) to fill in the rest.</div>
+    <label>What's going on?</label>
+    <textarea id="capText" style="min-height:80px;"></textarea>
+    <label>Location (optional)</label>
+    <input id="capLocation" list="unitSuggest" placeholder="e.g. AB17 — or leave blank">
+    <datalist id="unitSuggest">${dl}</datalist>
+    <div class="divider"></div>
+    <button class="btn" id="capSave" style="width:100%;">Capture</button>
+  `);
+  const textEl = document.getElementById('capText');
+  textEl.focus();
+  document.getElementById('capSave').onclick = async()=>{
+    const text = textEl.value.trim();
+    if(!text){ showToast('Jot something down first.'); return; }
+    state.defs.push({
+      id:uid(), location:document.getElementById('capLocation').value.trim(), description:text,
+      owner:'Unassigned', dueDate:null, dueType:'fixed', priority:'Medium', category:'Construction',
+      estimatedMinutes:null, status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
+      verifier:null, followUpDate:null, startedAt:null, notes:[]
+    });
+    await sset('defs', state.defs);
+    closeModal();
+    showToast('Captured — find it under Deficiencies → No Date.');
+    render();
+  };
+}
+
 function openDefModal(prefillLocation, onSaved){
   const dl = state.units.map(u=>`<option value="${escapeHtml(u.name)}">`).join('');
   let overbookConfirmed = false;
@@ -1451,9 +1626,14 @@ function openDefModal(prefillLocation, onSaved){
     <input id="dLocation" list="unitSuggest" placeholder="e.g. AB17 or AURORA/JUNIPER SITE" value="${escapeHtml(prefillLocation||'')}">
     <datalist id="unitSuggest">${dl}</datalist>
     <label>Description</label><textarea id="dDesc" style="min-height:60px;"></textarea>
+    <label>Owner</label><select id="dOwner"><option>Trade</option><option>Josh</option><option>Unassigned</option></select>
     <div class="field-row">
-      <div><label>Owner</label><select id="dOwner"><option>Trade</option><option>Josh</option><option>Unassigned</option></select></div>
       <div><label>Due Date</label><input id="dDue" type="date"></div>
+      <div><label>Schedule</label>
+      <select id="dDueType">
+        <option value="fixed" selected>Fixed date</option>
+        <option value="flexible">Flexible (auto-scheduled)</option>
+      </select></div>
     </div>
     <div class="field-row">
       <div><label>Priority</label>
@@ -1481,7 +1661,8 @@ function openDefModal(prefillLocation, onSaved){
     if(!desc) return;
     const owner = document.getElementById('dOwner').value;
     const dueDate = document.getElementById('dDue').value || null;
-    if(owner==='Josh' && dueDate && !overbookConfirmed){
+    const dueType = document.getElementById('dDueType').value;
+    if(owner==='Josh' && dueDate && dueType==='fixed' && !overbookConfirmed){
       const count = joshBookingCount(dueDate);
       if(count>=2){
         overbookConfirmed = true;
@@ -1493,15 +1674,19 @@ function openDefModal(prefillLocation, onSaved){
       }
     }
     const estVal = document.getElementById('dEstimate').value;
-    state.defs.push({
+    const newDef = {
       id:uid(), location:document.getElementById('dLocation').value.trim(), description:desc,
-      owner, dueDate, priority:document.getElementById('dPriority').value,
+      owner, dueDate, dueType, priority:document.getElementById('dPriority').value,
       category: document.getElementById('dCategory').value,
       estimatedMinutes: (owner!=='Trade' && estVal) ? Number(estVal) : null,
-      status:'DO', pushCount:0, pushReason:'', createdDate:todayISO()
-    });
-    await sset('defs', state.defs); closeModal();
-    if(onSaved) onSaved(); else render();
+      status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
+      verifier:null, followUpDate:null, startedAt:null, notes:[]
+    };
+    state.defs.push(newDef);
+    await sset('defs', state.defs);
+    const finish = ()=>{ if(onSaved) onSaved(); else render(); };
+    if(newDef.estimatedMinutes > 60) openSubtaskPromptModal(newDef.id, finish);
+    else { closeModal(); finish(); }
   };
 }
 
@@ -1819,8 +2004,8 @@ async function doRestore(){
       await sset('logHistory', state.logHistory);
       await sset('migrated_unit_names_v2', true);
       await sset('migrated_rounds_v1', true);
-      activeTab='today';
-      document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('active', x.dataset.tab==='today'));
+      activeTab='brief';
+      document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('active', x.dataset.tab==='brief'));
       render();
       showToast('Restored. Data from ' + (data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'backup file') + '.');
     }catch(e){ showToast('Restore failed: ' + e.message); }
