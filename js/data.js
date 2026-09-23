@@ -429,6 +429,7 @@ async function loadAll(){
   await migratePossessionExactMatch_v1();
   await migrateClearPhaseChecklists_v1();
   await migratePhaseChecklistByPhaseSeed_v1();
+  await migrateClearLegacyMasterChecklist_v1();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -697,6 +698,23 @@ async function migrateClearPhaseChecklists_v1(){
   await sset('checklistGroups', state.checklistGroups);
   await sset('groupInstances', state.groupInstances);
   await sset('migrated_clear_phase_checklists_v1', true);
+}
+
+/* The original master/instances "Ad-hoc Checklist" (2 generic seed items -
+   Backing/Blocking Verification, Pre-Drywall Backing Re-Check - cloned onto
+   every unit at initial setup) predates the real phase-checklist rebuild
+   above and was never replaced with real content; it just kept showing the
+   same placeholder pair on every Unit Detail page. Clears the data only -
+   the Checklist Master tab (addMasterItem/openMasterModal) stays fully
+   functional for a real item added later. Runs once, gated below. */
+async function migrateClearLegacyMasterChecklist_v1(){
+  const done = await sget('migrated_clear_legacy_master_checklist_v1', false);
+  if(done) return;
+  state.master = [];
+  state.instances = [];
+  await sset('master', state.master);
+  await sset('instances', state.instances);
+  await sset('migrated_clear_legacy_master_checklist_v1', true);
 }
 
 /* Loads Josh's "By Phase" rebuild (22 broad QC groups, replacing the empty
