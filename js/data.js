@@ -878,6 +878,22 @@ function businessDaysForward(fromISO, count){
   while(days.length < count){ d = nextBusinessDay(d); days.push(d); }
   return days;
 }
+/* Every business day from fromISO through untilISO, inclusive — both ends
+   rolled forward off a weekend the same way computeWeekSchedule's
+   dayIndexFor rolls a weekend dueDate onto the next business day, so a
+   subtask spread always actually reaches the real (possibly-weekend) due
+   date instead of stopping one business day short of it. */
+function businessDaysUntil(fromISO, untilISO){
+  let d = fromISO;
+  let dow = new Date(d+'T00:00:00').getDay();
+  while(dow===0 || dow===6){ d = addDays(d, 1); dow = new Date(d+'T00:00:00').getDay(); }
+  let until = untilISO;
+  let udow = new Date(until+'T00:00:00').getDay();
+  while(udow===0 || udow===6){ until = addDays(until, 1); udow = new Date(until+'T00:00:00').getDay(); }
+  const days = [d];
+  while(days[days.length-1] < until){ d = nextBusinessDay(d); days.push(d); }
+  return days;
+}
 
 const WEEK_SCHEDULE_SORT_KEY = (a,b)=>
   (a.dueDate||'').localeCompare(b.dueDate||'')
@@ -1006,12 +1022,30 @@ async function pushDefToNextBusinessDay(defId, fromDay, toDay){
    actually completed, it was decomposed) so it drops out of every existing
    status!=='Done' filter with zero new call sites to touch; a note records
    what happened to it. */
+/* One date per subtask (index i of N) whenever Josh didn't set one by
+   hand — spread evenly across the business days from today through the
+   parent's real due date, first subtask landing today, last landing on
+   the due date itself, so breaking a task down still respects the
+   deadline. This is exactly the "one piece per day, mental load spread
+   out, rest of each day stays free for interruptions" workflow Josh
+   described — deliberate placement, so every subtask created this way is
+   dueType 'fixed' regardless of what the parent was: a flexible subtask
+   would let the auto-scheduler re-clump them back together the moment a
+   day has spare capacity, undoing the whole point of spreading them. */
+function suggestSubtaskDueDates(parentDueDate, count){
+  if(!parentDueDate || count<=0) return new Array(count).fill(null);
+  if(count===1) return [parentDueDate];
+  const window = businessDaysUntil(todayISO(), parentDueDate);
+  return Array.from({length:count}, (_,i)=> window[Math.round(i*(window.length-1)/(count-1))]);
+}
+
 async function splitDefIntoSubtasks(defId, subtasks){
   const parent = state.defs.find(x=>x.id===defId);
   if(!parent || !subtasks.length) return [];
-  const created = subtasks.map(st => ({
+  const suggested = suggestSubtaskDueDates(parent.dueDate, subtasks.length);
+  const created = subtasks.map((st,i) => ({
     id: uid(), location: parent.location, description: st.text,
-    owner: parent.owner, dueDate: parent.dueDate, dueType: parent.dueType||'fixed', priority: parent.priority,
+    owner: parent.owner, dueDate: st.dueDate || suggested[i], dueType: 'fixed', priority: parent.priority,
     category: parent.category, estimatedMinutes: st.minutes || null,
     status: 'DO', pushCount: 0, pushReason: '', createdDate: todayISO(),
     verifier: null, followUpDate: null, startedAt: null, notes: [],
