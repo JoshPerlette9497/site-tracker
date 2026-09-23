@@ -84,6 +84,8 @@ function renderBrief(){
   }
   html += renderUpcomingScheduleSection();
 
+  html += capacitySection();
+
   html += `<div class="section-title">Trade — Due Today/Tomorrow<span class="pill">${tradeDueSoon.length}</span></div>`;
   html += tradeDueSoon.length ? tradeDueSoon.map(d=>cardForDef(d, dueStatus(d.dueDate, d.status))).join('') : `<div class="empty">None due soon.</div>`;
 
@@ -109,6 +111,7 @@ function renderBrief(){
   app.innerHTML = html;
   wireCardActions();
   wireScheduleActions();
+  wireCapacityActions();
   wireDragReorder();
   wireSafetyWalkthroughActions();
 }
@@ -417,6 +420,51 @@ function wireScheduleActions(){
     const id = e.target.closest('[data-planid]').dataset.planid;
     await clearPlannedDate(id);
     render();
+  });
+}
+
+/* Next 5 business days: Josh's own workload vs. his daily budget, with
+   push suggestions (shortest-time-first, same tiebreak as Suggested Plan)
+   for whatever doesn't fit a day. Suggestions are read-only until
+   confirmed via the Push button — nothing here touches a real due date. */
+function capacitySection(){
+  const forecast = buildCapacityForecast();
+  let html = `<div class="section-title" style="margin-top:14px;">Capacity — Next 5 Business Days</div>`;
+  for(const day of forecast){
+    const over = day.used > day.budget;
+    const toSuggest = [...day.pushed, ...(day.overflow||[])];
+    html += `<div class="card${over?' overdue':''}">
+      <div class="row">
+        <div class="item-name">${fmtDate(day.day)}</div>
+        <span class="stamp ${over?'overdue':'done'}">${day.used}/${day.budget}m</span>
+      </div>`;
+    if(toSuggest.length){
+      const nextDay = nextBusinessDay(day.day);
+      html += `<div class="item-meta" style="margin-top:6px;">Won't fit — suggest pushing to ${fmtDate(nextDay)}:</div>`;
+      for(const item of toSuggest){
+        html += `<div class="row" data-capacity-def="${item.id}" data-capacity-today="${day.day}" data-capacity-next="${nextDay}" style="margin-top:6px; align-items:center; gap:6px;">
+          <div style="flex:1; min-width:0;">
+            <div class="item-name" style="font-size:13px;">${escapeHtml(item.description)}</div>
+            <div class="item-meta">${escapeHtml(item.location||'—')} · ${item.estimatedMinutes||PLAN_DEFAULT_ESTIMATE}m${priorityTag(item)}</div>
+          </div>
+          <button class="btn small capacity-push">Push</button>
+          <button class="btn small ghost capacity-deny">Keep</button>
+        </div>`;
+      }
+    }
+    html += `</div>`;
+  }
+  return html;
+}
+function wireCapacityActions(){
+  document.querySelectorAll('.capacity-push').forEach(b=>b.onclick=async(e)=>{
+    const row = e.target.closest('[data-capacity-def]');
+    await pushDefToNextBusinessDay(row.dataset.capacityDef, row.dataset.capacityToday, row.dataset.capacityNext);
+    showToast('Pushed to '+fmtDate(row.dataset.capacityNext)+'.');
+    render();
+  });
+  document.querySelectorAll('.capacity-deny').forEach(b=>b.onclick=(e)=>{
+    e.target.closest('[data-capacity-def]').remove();
   });
 }
 

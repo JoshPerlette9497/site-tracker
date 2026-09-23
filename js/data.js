@@ -840,6 +840,93 @@ function followUpsDue(){
     );
 }
 
+/* ---------- capacity planning (next 5 business days) ---------- */
+function nextBusinessDay(iso){
+  let d = addDays(iso, 1);
+  let dow = new Date(d+'T00:00:00').getDay();
+  while(dow===0 || dow===6){ d = addDays(d, 1); dow = new Date(d+'T00:00:00').getDay(); }
+  return d;
+}
+/* Mon-Fri only, no weekends — starts on fromISO itself if it's a business
+   day (rolls forward to Monday first if not), then walks forward count-1
+   more business days. */
+function businessDaysForward(fromISO, count){
+  let d = fromISO;
+  let dow = new Date(d+'T00:00:00').getDay();
+  while(dow===0 || dow===6){ d = addDays(d, 1); dow = new Date(d+'T00:00:00').getDay(); }
+  const days = [d];
+  while(days.length < count){ d = nextBusinessDay(d); days.push(d); }
+  return days;
+}
+
+/* Projects Josh's own (MY_ACTION) open workload across the next 5 business
+   days against dailyAllowanceMinutes, using the same greedy fill/tiebreak
+   as buildSuggestedPlan. Whatever doesn't fit a day carries into the next
+   one as a push candidate — cascading, so an overloaded Monday can ripple
+   into Tuesday. Read-only: nothing here mutates state or touches a real
+   dueDate — confirmPushToNextBusinessDay() below does that, one item at a
+   time, only when the user confirms the suggestion. Trade/Delegated items
+   are excluded entirely, same as today's budget already excludes them —
+   they were never Josh's time to plan against. */
+function buildCapacityForecast(){
+  const budget = state.dailyAllowanceMinutes || 480;
+  const days = businessDaysForward(todayISO(), 5);
+  const lastDay = days[days.length-1];
+  const pool = state.defs.filter(d=>
+    d.status!=='Done' && d.owner==='Josh' && d.dueDate && d.dueDate<=lastDay && isUnitActiveByLocation(d.location)
+  );
+  const sortKey = (a,b)=>
+    (a.dueDate||'').localeCompare(b.dueDate||'')
+    || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
+    || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
+    || (a.estimatedMinutes||PLAN_DEFAULT_ESTIMATE)-(b.estimatedMinutes||PLAN_DEFAULT_ESTIMATE);
+
+  // Assign every pool item to a forecast day: the first business day whose
+  // date is >= its dueDate. Rolls anything overdue (or due today) into day
+  // 0, and anything due on a weekend forward onto the next business day —
+  // without this, a weekend-due item matches no bucket by exact equality
+  // and silently drops out of the forecast entirely.
+  const dayIndexFor = (dueDate) => {
+    for(let i=0; i<days.length; i++){ if(dueDate<=days[i]) return i; }
+    return days.length-1;
+  };
+  const byDay = days.map(()=>[]);
+  for(const item of pool) byDay[dayIndexFor(item.dueDate)].push(item);
+
+  const result = [];
+  let carry = [];
+  for(let i=0; i<days.length; i++){
+    const day = days[i];
+    const candidates = [...carry, ...byDay[i]].sort(sortKey);
+    const fits = [], pushed = [];
+    let used = 0;
+    for(const item of candidates){
+      const mins = item.estimatedMinutes || PLAN_DEFAULT_ESTIMATE;
+      if(fits.length===0 || used+mins<=budget){ fits.push(item); used += mins; }
+      else pushed.push(item);
+    }
+    const isLastDay = i===days.length-1;
+    result.push({day, budget, used, fits, pushed: isLastDay ? [] : pushed, overflow: isLastDay ? pushed : []});
+    carry = pushed;
+  }
+  return result;
+}
+
+/* Confirms a capacity-forecast push suggestion: moves the item's real due
+   date forward one business day, tracked the same way a checklist
+   instance's Push button already tracks a backlog push (pushCount/
+   pushReason) — deficiencies had those fields since the original import
+   but no UI ever wrote to them. One item, one day, at a time; the
+   forecast recomputes fresh from the new dueDate on next render. */
+async function pushDefToNextBusinessDay(defId, fromDay, toDay){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d) return;
+  d.pushCount = (d.pushCount||0)+1;
+  d.pushReason = `capacity: bumped from ${fromDay} to ${toDay} — day was full`;
+  d.dueDate = toDay;
+  await sset('defs', state.defs);
+}
+
 /* ---------- Josh's own forward-looking task schedule (plannedDate) ----------
    A personal commitment - "I'll actually do this Thursday" - separate from
    dueDate/dueOverride (the real deadline). Nothing here is ever set
