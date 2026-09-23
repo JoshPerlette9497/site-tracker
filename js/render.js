@@ -48,6 +48,7 @@ function renderBrief(){
   const tradeDueSoon = openDefs.filter(d=>d.owner==='Trade' && d.dueDate && d.dueDate<=tomorrow);
   const tradeOpenNoDue = openDefs.filter(d=>d.owner==='Trade' && !d.dueDate);
   const backlogCount = openDefs.filter(d=>(d.pushCount||0)>=1).length;
+  const needsTriageCount = openDefs.filter(d=>!d.dueDate).length;
 
   const checklistOverdue = [], checklistDueToday = [], checklistCompletedToday = [];
   for(const inst of state.instances){
@@ -106,6 +107,9 @@ function renderBrief(){
     <div class="item-meta"><b>${checklistCompletedToday.length}</b> completed today</div>
   </div>`;
 
+  if(needsTriageCount>0){
+    html += `<div class="empty" style="margin-top:8px;"><a href="#" id="needsTriageLink">Needs triage (no due date yet): ${needsTriageCount}</a></div>`;
+  }
   html += `<div class="empty" style="margin-top:8px;">Backlog (pushed items): ${backlogCount}</div>`;
 
   app.innerHTML = html;
@@ -114,6 +118,14 @@ function renderBrief(){
   wireCapacityActions();
   wireDragReorder();
   wireSafetyWalkthroughActions();
+  const triageLink = document.getElementById('needsTriageLink');
+  if(triageLink) triageLink.onclick = (e)=>{
+    e.preventDefault();
+    activeTab = 'defs';
+    defsFilterTab = 'undated';
+    document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('active', x.dataset.tab==='defs'));
+    render();
+  };
 }
 
 /* Wraps a scheduled-plan card with a drag handle so Josh can reorder today's
@@ -1554,6 +1566,44 @@ function openDefImportModal(){
 
 function joshBookingCount(dueDate, excludeId){
   return state.defs.filter(d=>d.id!==excludeId && d.owner==='Josh' && d.dueDate===dueDate && d.status!=='Done').length;
+}
+
+/* Quick capture — the deliberately-skipped-until-now "capture button" from
+   the original roadmap. One field, no decisions forced up front: no
+   location/owner/due date/priority/estimate required. Everything jotted
+   here lands as owner Unassigned with no due date, so it surfaces exactly
+   where the app's existing (pre-dating this work) triage filters already
+   look for it — Deficiencies → No Date, and Missing Estimate — without
+   needing any new filter built for it. */
+function openCaptureModal(){
+  const dl = state.units.map(u=>`<option value="${escapeHtml(u.name)}">`).join('');
+  showModal(`
+    <h2>Capture</h2>
+    <div class="helptext" style="margin-bottom:8px;">Jot it down now — nothing else required. Find it later under Deficiencies → No Date (or Missing Estimate) to fill in the rest.</div>
+    <label>What's going on?</label>
+    <textarea id="capText" style="min-height:80px;"></textarea>
+    <label>Location (optional)</label>
+    <input id="capLocation" list="unitSuggest" placeholder="e.g. AB17 — or leave blank">
+    <datalist id="unitSuggest">${dl}</datalist>
+    <div class="divider"></div>
+    <button class="btn" id="capSave" style="width:100%;">Capture</button>
+  `);
+  const textEl = document.getElementById('capText');
+  textEl.focus();
+  document.getElementById('capSave').onclick = async()=>{
+    const text = textEl.value.trim();
+    if(!text){ showToast('Jot something down first.'); return; }
+    state.defs.push({
+      id:uid(), location:document.getElementById('capLocation').value.trim(), description:text,
+      owner:'Unassigned', dueDate:null, priority:'Medium', category:'Construction',
+      estimatedMinutes:null, status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
+      verifier:null, followUpDate:null, startedAt:null, notes:[]
+    });
+    await sset('defs', state.defs);
+    closeModal();
+    showToast('Captured — find it under Deficiencies → No Date.');
+    render();
+  };
 }
 
 function openDefModal(prefillLocation, onSaved){

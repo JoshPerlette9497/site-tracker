@@ -114,6 +114,13 @@
     display:flex; padding-bottom:env(safe-area-inset-bottom);
     box-shadow:0 -2px 10px rgba(0,0,0,0.05);
   }
+  .capture-fab{
+    position:fixed; right:16px; bottom:calc(78px + env(safe-area-inset-bottom)); z-index:21;
+    width:52px; height:52px; border-radius:50%; border:none;
+    background:var(--brand-dark); color:#fff; font-size:22px; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 4px 14px rgba(0,0,0,0.28); cursor:pointer;
+  }
   nav.tabs button{
     flex:1; min-width:0; background:none; border:none; color:var(--ink-dim);
     padding:10px 1px 8px; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.2px;

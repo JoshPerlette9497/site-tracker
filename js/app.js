@@ -40,6 +40,9 @@ document.querySelectorAll('nav.tabs button').forEach(b=>{
   };
 });
 
+/* ---------- capture ---------- */
+document.getElementById('captureFab').onclick = ()=>openCaptureModal();
+
 /* ---------- access gate ----------
    verifySiteKey returns:
      'ok'       - key confirmed good
