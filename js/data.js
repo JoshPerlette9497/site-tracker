@@ -782,6 +782,8 @@ function buildSuggestedPlan(){
       (a.due||'').localeCompare(b.due||'')
       || (CATEGORY_ORDER[a.category]??1)-(CATEGORY_ORDER[b.category]??1)
       || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
+      || a.minutes-b.minutes // final tiebreak: shortest estimated time first, so a same-day/same-priority
+                             // pile doesn't stall on a long item — clears more, builds momentum
     );
 
   // Phase checks are never time-budgeted or deferrable — only Josh's own
