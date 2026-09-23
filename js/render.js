@@ -446,18 +446,31 @@ function categoryTag(d){
 }
 
 function cardForDef(d, st){
+  const startedMeta = d.startedAt ? ' · started '+new Date(d.startedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}) : '';
+  const verifierMeta = d.verifier ? ' · verify: '+escapeHtml(d.verifier) : '';
   return `<div class="card ${st} def-card" data-def="${d.id}" style="cursor:pointer;">
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(d.description)}</div>
-        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${d.followUpDate?' · follow up '+fmtDate(d.followUpDate):''}${priorityTag(d)}${categoryTag(d)}</div>
+        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${d.followUpDate?' · follow up '+fmtDate(d.followUpDate):''}${startedMeta}${verifierMeta}${priorityTag(d)}${categoryTag(d)}</div>
       </div>
       <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>
     <div class="row" style="margin-top:10px; gap:6px;">
+      ${(st!=='done' && !d.startedAt) ? '<button class="btn small ghost act-start">Start</button>' : ''}
       <button class="btn small done-btn defact-done">Mark Done</button>
     </div>
   </div>`;
+}
+
+/* Append-only notes log, newest first. ts is either a full ISO datetime
+   (addDefNote) or a plain YYYY-MM-DD date (migrated from a legacy
+   pushReason) — both slice cleanly to the date fmtDate expects. */
+function notesListHtml(notes){
+  if(!notes || !notes.length) return `<div class="helptext" style="opacity:0.6;">No notes yet.</div>`;
+  return notes.slice().reverse().map(n=>
+    `<div class="item-meta" style="margin-bottom:4px;">${n.ts?fmtDate(n.ts.slice(0,10))+' — ':''}${escapeHtml(n.text)}</div>`
+  ).join('');
 }
 
 const ESTIMATE_MINUTE_OPTIONS = [5, 10, 30, 60, 120];
@@ -530,12 +543,29 @@ function openEditDefModal(defId, onSaved){
       <option value="Construction" ${(!d.category||d.category==='Construction')?'selected':''}>Construction</option>
       <option value="Safety" ${d.category==='Safety'?'selected':''}>Safety</option>
     </select>
+    <div class="field-row" style="margin-top:8px;">
+      <div><label>Verifier</label><input id="edVerifier" type="text" placeholder="Who confirms it's done?" value="${escapeHtml(d.verifier||'')}"></div>
+      <div><label>Follow-up Date</label><input id="edFollowUp" type="date" value="${d.followUpDate||''}"></div>
+    </div>
+    <label style="margin-top:8px; display:block;">Notes</label>
+    <div id="edNotesList" style="max-height:120px; overflow-y:auto; margin-bottom:6px;">${notesListHtml(d.notes)}</div>
+    <div class="row" style="gap:6px;">
+      <input id="edNewNote" type="text" placeholder="Add a note…" style="flex:1;">
+      <button class="btn small" id="edAddNote">Add</button>
+    </div>
     <div id="edOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="edSave" style="width:100%;">Save Changes</button>
   `);
   document.getElementById('edOwner').onchange = (e)=>{
     document.getElementById('edEstimateWrap').style.display = e.target.value==='Trade' ? 'none' : '';
+  };
+  document.getElementById('edAddNote').onclick = async()=>{
+    const text = document.getElementById('edNewNote').value.trim();
+    if(!text) return;
+    await addDefNote(d.id, text);
+    document.getElementById('edNewNote').value = '';
+    document.getElementById('edNotesList').innerHTML = notesListHtml(d.notes);
   };
   document.getElementById('edSave').onclick = async()=>{
     const desc = document.getElementById('edDesc').value.trim();
@@ -561,6 +591,8 @@ function openEditDefModal(defId, onSaved){
     if(dueDate !== originalDueDate) d.plannedDate = null;
     d.priority = document.getElementById('edPriority').value;
     d.category = document.getElementById('edCategory').value;
+    d.verifier = document.getElementById('edVerifier').value.trim() || null;
+    d.followUpDate = document.getElementById('edFollowUp').value || null;
     const estVal = document.getElementById('edEstimate').value;
     d.estimatedMinutes = (owner!=='Trade' && estVal) ? Number(estVal) : null;
     await sset('defs', state.defs);
@@ -590,6 +622,12 @@ function wireCardActions(){
     e.stopPropagation();
     const id = e.target.closest('[data-def]').dataset.def;
     markDefDoneWithTimeCheck(id, render);
+  });
+  document.querySelectorAll('.act-start').forEach(b=>b.onclick=async(e)=>{
+    e.stopPropagation();
+    const id = e.target.closest('[data-def]').dataset.def;
+    await markDefStarted(id);
+    render();
   });
   document.querySelectorAll('.def-card').forEach(card=>card.onclick=(e)=>{
     if(e.target.closest('button')) return;
