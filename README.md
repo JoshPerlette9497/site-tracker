@@ -18,6 +18,11 @@ Currently backed by Supabase (already set up):
 - RLS policy on `app_data` requires every request to carry an `x-site-key` header matching a shared passphrase (see "Access code" below) — replaced the old wide-open anon policy once the site moved to a public GitHub Pages URL.
 - The anon key is in `js/storage.js` under `SUPABASE_ANON_KEY` — safe to keep client-side (that's how Supabase's anon key is designed to work); the RLS policy above is what actually gates read/write access now.
 
+### Unified task model — Phase 1 (deficiencies only)
+`defs` items now carry a shared task shape, added in `js/data.js` (`migrateDefTaskFields_v1`, `unifiedTaskStatus`): `verifier`, `followUpDate` (distinct from `dueDate` — a check-back reminder, not a deadline), `startedAt`, and an append-only `notes[]` log (seeded from any existing `pushReason` on migration, which itself is untouched and still drives the push/backlog UI). `unifiedTaskStatus(d)` is computed on read, never stored, so it can't desync from `owner`/`status` edited through the existing Add/Edit Deficiency modals.
+
+Deliberately **not** touched: phase checklist groups/items (`checklistGroups`/`groupInstances`) and the legacy `master`/`instances` pair. They stay their own thing — surfaced by `currentPhaseChecklistGroup()`/`buildSuggestedPlan()` off round-logging (`currentPhase`/`lastWalkDate`), which this phase leaves completely alone. No new UI was added — the new fields exist in the data model only; the next phase (a "NOW" view, capacity planning) is what will read/write them.
+
 ## Safety walkthrough photo storage (one-time setup required)
 The daily Safety Walkthrough feature (Brief tab) uploads per-checklist-item
 photos to a Supabase Storage bucket named `hazard-photos` (`js/storage.js`:

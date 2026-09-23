@@ -1427,7 +1427,8 @@ function openDefImportModal(){
           id:uid(), location:r.location||'', description:r.description||'(no description)',
           owner:r.owner||'Unassigned', status:r.status||'DO', dueDate:r.dueDate||null,
           priority:r.priority||'Medium',
-          pushCount:r.pushCount||0, pushReason:r.pushReason||''
+          pushCount:r.pushCount||0, pushReason:r.pushReason||'',
+          verifier:r.verifier||null, followUpDate:r.followUpDate||null, startedAt:null, notes:[]
         });
         added++;
       }
@@ -1498,7 +1499,8 @@ function openDefModal(prefillLocation, onSaved){
       owner, dueDate, priority:document.getElementById('dPriority').value,
       category: document.getElementById('dCategory').value,
       estimatedMinutes: (owner!=='Trade' && estVal) ? Number(estVal) : null,
-      status:'DO', pushCount:0, pushReason:'', createdDate:todayISO()
+      status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
+      verifier:null, followUpDate:null, startedAt:null, notes:[]
     });
     await sset('defs', state.defs); closeModal();
     if(onSaved) onSaved(); else render();

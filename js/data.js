@@ -422,6 +422,7 @@ async function loadAll(){
   await migrateDefIds();
   await migrateDefPriority();
   await migrateDefCategory();
+  await migrateDefTaskFields_v1();
   await migrateChecklistMatchPhases();
   await migrateSafetyWalkthroughShape();
   await migratePhaseChecklistRewrite_v1();
@@ -510,6 +511,78 @@ async function migrateDefCategory(){
     if(!d.category){ d.category = 'Construction'; changed = true; }
   }
   if(changed) await sset('defs', state.defs);
+}
+
+/* ---------- unified task model (Phase 1 — deficiencies only) ----------
+   Foundation fields shared with any future "what/where/owner/verifier/
+   due/follow-up/estimate/priority/status/timestamps/notes" task shape.
+   Everything except verifier/followUpDate/startedAt/notes already existed
+   on a deficiency under a different name (what=description, where=location,
+   owner=owner, due_date=dueDate, estimated_duration=estimatedMinutes,
+   created_at/completed_at=createdDate/completedDate) — those are left alone.
+   Phase checklist groups/items are intentionally NOT touched: they stay
+   their own thing, surfaced by currentPhaseChecklistGroup()/
+   buildSuggestedPlan() off round-logging (currentPhase/lastWalkDate), not
+   by anything in this migration. */
+async function migrateDefTaskFields_v1(){
+  const done = await sget('migrated_def_task_fields_v1', false);
+  if(done) return;
+  for(const d of state.defs){
+    if(d.verifier === undefined) d.verifier = null;
+    if(d.followUpDate === undefined) d.followUpDate = null;
+    if(d.startedAt === undefined) d.startedAt = null;
+    if(d.notes === undefined){
+      // One-time enrichment: carry the existing single-string pushReason
+      // into the new append-only notes log as its first historical entry,
+      // without touching pushReason itself (the push/backlog UI still
+      // reads/writes that field exactly as before).
+      d.notes = d.pushReason
+        ? [{ts: d.createdDate || null, text: d.pushReason, source: 'migrated_from_pushReason'}]
+        : [];
+    }
+  }
+  await sset('defs', state.defs);
+  await sset('migrated_def_task_fields_v1', true);
+}
+
+/* Computed, not stored — so editing owner/status through the existing
+   modal (openEditDefModal, markDefDoneWithTimeCheck) can never desync a
+   cached value. Mirrors the read-only-derived pattern already used by
+   dueStatus()/computeRisk()/groupStatus(). MY_ACTION/DELEGATED assumes an
+   open item's owner is Josh or Trade (true of every open deficiency in
+   current data); Unassigned+open falls back to DELEGATED since nothing in
+   the 5-value spec models "nobody assigned yet". */
+function unifiedTaskStatus(d){
+  if(d.status === 'Done') return 'DONE';
+  if(d.status === 'WAIT') return 'WAITING';
+  if(d.owner === 'Josh') return 'MY_ACTION';
+  return 'DELEGATED';
+}
+
+async function setDefVerifier(defId, verifier){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d) return;
+  d.verifier = verifier || null;
+  await sset('defs', state.defs);
+}
+async function setDefFollowUpDate(defId, date){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d) return;
+  d.followUpDate = date || null;
+  await sset('defs', state.defs);
+}
+async function markDefStarted(defId){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d || d.startedAt) return;
+  d.startedAt = new Date().toISOString();
+  await sset('defs', state.defs);
+}
+async function addDefNote(defId, text){
+  const d = state.defs.find(x=>x.id===defId);
+  if(!d || !text || !text.trim()) return;
+  d.notes = d.notes || [];
+  d.notes.push({ts: new Date().toISOString(), text: text.trim()});
+  await sset('defs', state.defs);
 }
 
 const CHECKLIST_MATCH_UPDATES = {
