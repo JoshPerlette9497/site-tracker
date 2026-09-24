@@ -63,6 +63,9 @@ Each subtask row in the breakdown modal now has an optional due-date field. `sug
 
 Verified with a dedicated Node harness (exact N-days-equals-N-subtasks case with no repeats, uneven spreads, weekend due-date rollover, no-due-date fallback, more subtasks than available days degrading gracefully instead of erroring, manual dates respected alongside auto-filled ones) and a headless browser: 4 subtasks with blank dates landed on 4 distinct business days, all fixed, no errors.
 
+### Capture location — dropdown of active units only
+`openCaptureModal()`'s location field was free text with a `<datalist>` of suggestions — nothing stopped a typo or an arbitrary string from being saved. It's now a strict `<select>` built from `state.units.filter(u=>u.active)`, plus a blank "— none —" first option (kept, since Capture's whole design is "nothing else required" — this only constrains location to a real active unit *when one is given*, it doesn't force one). Scoped to Capture only, per Josh's request — the Add Deficiency modal's location field is unchanged for now (a broader "must this always be a real unit" question is still open, flagged in an earlier conversation but deferred). Verified in a headless browser: dropdown lists only active units, an inactive unit is correctly excluded, free text is no longer possible, selection saves correctly.
+
 ## Safety walkthrough photo storage (one-time setup required)
 The daily Safety Walkthrough feature (Brief tab) uploads per-checklist-item
 photos to a Supabase Storage bucket named `hazard-photos` (`js/storage.js`:
