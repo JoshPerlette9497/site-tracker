@@ -1590,15 +1590,22 @@ function joshBookingCount(dueDate, excludeId){
    look for it — Deficiencies → No Date, and Missing Estimate — without
    needing any new filter built for it. */
 function openCaptureModal(){
-  const dl = state.units.map(u=>`<option value="${escapeHtml(u.name)}">`).join('');
+  // Active units only, strict dropdown — no free text. A captured item's
+  // location has to be a real unit you're actively tracking, not a typo or
+  // an arbitrary string; the blank first option keeps location itself
+  // optional, matching Capture's "nothing else required" design.
+  const activeUnitOptions = state.units.filter(u=>u.active)
+    .map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join('');
   showModal(`
     <h2>Capture</h2>
     <div class="helptext" style="margin-bottom:8px;">Jot it down now — nothing else required. Find it later under Deficiencies → No Date (or Missing Estimate) to fill in the rest.</div>
     <label>What's going on?</label>
     <textarea id="capText" style="min-height:80px;"></textarea>
     <label>Location (optional)</label>
-    <input id="capLocation" list="unitSuggest" placeholder="e.g. AB17 — or leave blank">
-    <datalist id="unitSuggest">${dl}</datalist>
+    <select id="capLocation">
+      <option value="">— none —</option>
+      ${activeUnitOptions}
+    </select>
     <div class="divider"></div>
     <button class="btn" id="capSave" style="width:100%;">Capture</button>
   `);
@@ -1608,7 +1615,7 @@ function openCaptureModal(){
     const text = textEl.value.trim();
     if(!text){ showToast('Jot something down first.'); return; }
     state.defs.push({
-      id:uid(), location:document.getElementById('capLocation').value.trim(), description:text,
+      id:uid(), location:document.getElementById('capLocation').value, description:text,
       owner:'Unassigned', dueDate:null, dueType:'fixed', priority:'Medium', category:'Construction',
       estimatedMinutes:null, status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
       verifier:null, followUpDate:null, startedAt:null, notes:[]
