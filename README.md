@@ -104,7 +104,7 @@ but worth knowing before storing anything sensitive as a "hazard photo."
 ## Deployment
 - **GitHub**: public repo `JoshPerlette9497/site-tracker`, default branch `master`. Made public specifically so GitHub Pages could serve it for free (Pages on private repos requires a paid GitHub plan); the repo being public is fine since the app's actual data is gated by the Supabase access-code policy above, not by hiding the source.
 - **GitHub Pages**: [joshperlette9497.github.io/site-tracker](https://joshperlette9497.github.io/site-tracker/), deploys from `master` root on every push (Settings → Pages → Deploy from a branch). No build step — same static files Netlify used to serve.
-- **Netlify**: retired. The project previously lived at `slokker-site-log.netlify.app`; moved off it once its free tier usage cap started incurring charges. Safe to delete/downgrade that Netlify site now that Pages is confirmed working.
+- **Netlify**: retired as of production traffic, but its GitHub App integration stayed connected to this repo long after that — it kept auto-building a deploy preview (and sending email notifications) on every pull request, unrelated to the "retired" note above being written. Confirmed fully disconnected 2026-09-27 (Josh uninstalled the Netlify GitHub App). If Netlify activity ever resumes unexpectedly, check GitHub repo Settings → Integrations → GitHub Apps first, not just the Netlify dashboard — the two are separate connections and both need to be gone.
 
 ## Files in this folder
 - `index.html` — HTML shell only (header, tab nav, `<main>` mount point); loads `style.css` and the `js/` modules
