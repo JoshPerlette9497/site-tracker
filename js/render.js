@@ -715,7 +715,7 @@ function openEditDefModal(defId, onSaved){
     d.estimatedMinutes = (owner!=='Trade' && estVal) ? Number(estVal) : null;
     await sset('defs', state.defs);
     const finish = ()=>{ showToast('Deficiency updated.'); if(onSaved) onSaved(); };
-    if(d.estimatedMinutes >= 60 && d.status!=='Done' && !d.subtaskPromptDismissed){
+    if(d.estimatedMinutes >= 30 && d.status!=='Done' && !d.subtaskPromptDismissed){
       openSubtaskPromptModal(d.id, finish);
     } else {
       closeModal();
@@ -1695,7 +1695,7 @@ function openDefModal(prefillLocation, onSaved){
     state.defs.push(newDef);
     await sset('defs', state.defs);
     const finish = ()=>{ if(onSaved) onSaved(); else render(); };
-    if(newDef.estimatedMinutes >= 60) openSubtaskPromptModal(newDef.id, finish);
+    if(newDef.estimatedMinutes >= 30) openSubtaskPromptModal(newDef.id, finish);
     else { closeModal(); finish(); }
   };
 }
