@@ -1628,13 +1628,24 @@ function openCaptureModal(){
 }
 
 function openDefModal(prefillLocation, onSaved){
-  const dl = state.units.map(u=>`<option value="${escapeHtml(u.name)}">`).join('');
+  // Active units only, strict dropdown — same as Capture. If this was
+  // opened from a specific unit's own detail page (prefillLocation) and
+  // that unit happens to be inactive (e.g. logging something noticed
+  // right after marking it complete), include it too so the prefill still
+  // resolves — it just won't appear for manual/blank-start Add flows.
+  const activeUnits = state.units.filter(u=>u.active);
+  const prefillUnit = prefillLocation && !activeUnits.some(u=>u.name===prefillLocation)
+    ? state.units.find(u=>u.name===prefillLocation) : null;
+  const unitOptions = [...activeUnits, ...(prefillUnit?[prefillUnit]:[])]
+    .map(u=>`<option value="${escapeHtml(u.name)}" ${u.name===prefillLocation?'selected':''}>${escapeHtml(u.name)}</option>`).join('');
   let overbookConfirmed = false;
   showModal(`
     <h2>Add Deficiency</h2>
     <label>Location</label>
-    <input id="dLocation" list="unitSuggest" placeholder="e.g. AB17 or AURORA/JUNIPER SITE" value="${escapeHtml(prefillLocation||'')}">
-    <datalist id="unitSuggest">${dl}</datalist>
+    <select id="dLocation">
+      <option value="">— none —</option>
+      ${unitOptions}
+    </select>
     <label>Description</label><textarea id="dDesc" style="min-height:60px;"></textarea>
     <label>Owner</label><select id="dOwner"><option>Trade</option><option>Josh</option><option>Unassigned</option></select>
     <div class="field-row">
@@ -1685,7 +1696,7 @@ function openDefModal(prefillLocation, onSaved){
     }
     const estVal = document.getElementById('dEstimate').value;
     const newDef = {
-      id:uid(), location:document.getElementById('dLocation').value.trim(), description:desc,
+      id:uid(), location:document.getElementById('dLocation').value, description:desc,
       owner, dueDate, dueType, priority:document.getElementById('dPriority').value,
       category: document.getElementById('dCategory').value,
       estimatedMinutes: (owner!=='Trade' && estVal) ? Number(estVal) : null,
