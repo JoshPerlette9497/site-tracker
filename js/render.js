@@ -638,8 +638,11 @@ function openEditDefModal(defId, onSaved){
   if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
   const originalDueDate = d.dueDate;
   let overbookConfirmed = false;
+  const parent = d.parentId ? state.defs.find(x=>x.id===d.parentId) : null;
+  const children = state.defs.filter(x=>x.parentId===d.id);
   showModal(`
     <h2>Edit Deficiency</h2>
+    ${parent ? `<div class="helptext" style="margin-bottom:8px;">↳ part of: <a href="#" id="edParentLink" style="color:var(--brand-dark); font-weight:600;">${escapeHtml(parent.description)}</a></div>` : ''}
     <label>Description</label><textarea id="edDesc" style="min-height:60px;">${escapeHtml(d.description)}</textarea>
     <label>Owner</label><select id="edOwner">
       <option value="Trade" ${d.owner==='Trade'?'selected':''}>Trade</option>
@@ -678,6 +681,8 @@ function openEditDefModal(defId, onSaved){
       <input id="edNewNote" type="text" placeholder="Add a note…" style="flex:1;">
       <button class="btn small" id="edAddNote">Add</button>
     </div>
+    ${children.length ? `<label style="margin-top:8px; display:block;">Subtasks (${children.length})</label>
+    <div id="edSubtasksList">${children.map(subtaskEditRowHtml).join('')}</div>` : ''}
     ${d.status!=='Done' ? `<button class="btn small ghost" id="edBreakDown" style="width:100%; margin-top:10px;">Break Into Subtasks</button>` : ''}
     <div id="edOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
@@ -695,6 +700,11 @@ function openEditDefModal(defId, onSaved){
   };
   const breakDownBtn = document.getElementById('edBreakDown');
   if(breakDownBtn) breakDownBtn.onclick = ()=>openSubtaskPromptModal(d.id, ()=>render());
+  const parentLink = document.getElementById('edParentLink');
+  if(parentLink) parentLink.onclick = (e)=>{ e.preventDefault(); openEditDefModal(parent.id, onSaved); };
+  document.querySelectorAll('[data-subtask-edit]').forEach(el=>{
+    el.onclick = ()=>openEditDefModal(el.dataset.subtaskEdit, onSaved);
+  });
   document.getElementById('edSave').onclick = async()=>{
     const desc = document.getElementById('edDesc').value.trim();
     if(!desc){ showToast('Description cannot be empty.'); return; }
@@ -1516,6 +1526,18 @@ function defRowDone(d){
       <div class="item-name">${escapeHtml(d.description)}</div>
       <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}${categoryTag(d)}${subtaskLineageTag(d)}</div>
     </div><span class="stamp done">Done</span></div>
+  </div>`;
+}
+
+function subtaskEditRowHtml(c){
+  const st = dueStatus(c.dueDate, c.status);
+  const stampClass = c.status==='Done' ? 'done' : st;
+  const stampLabel = c.status==='Done' ? 'Done' : (st==='overdue'?'Overdue':st==='today'?'Today':'Open');
+  return `<div class="card" data-subtask-edit="${c.id}" style="cursor:pointer; padding:8px 10px; margin-bottom:6px;">
+    <div class="row"><div>
+      <div class="item-name" style="font-size:13px;">${escapeHtml(c.description)}</div>
+      <div class="item-meta">${c.dueDate?'due '+fmtDate(c.dueDate):'no due date'}</div>
+    </div><span class="stamp ${stampClass}">${stampLabel}</span></div>
   </div>`;
 }
 
