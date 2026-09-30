@@ -1441,9 +1441,11 @@ function renderDefs(){
 
   html += `<div id="defsListContainer">`;
   if(defsFilterTab==='dated'){
+    for(const p of parentsSurfacedIn(dated)){ html += splitParentRowHtml(p); }
     if(dated.length===0) html += `<div class="empty">Nothing with a due date yet.</div>`;
     for(const d of dated){ html += defRowWithActions(d); }
   } else if(defsFilterTab==='undated'){
+    for(const p of parentsSurfacedIn(undated)){ html += splitParentRowHtml(p); }
     if(undated.length===0) html += `<div class="empty">Everything has a due date.</div>`;
     for(const d of undated){ html += defRowWithActions(d, true); }
   } else {
@@ -1518,6 +1520,27 @@ function subtaskLineageTag(d){
   }
   const childCount = state.defs.filter(x=>x.parentId===d.id).length;
   return childCount>0 ? ` · split into ${childCount} subtask${childCount===1?'':'s'}` : '';
+}
+
+/* A split parent is always status:'Done' (it isn't really finished — its
+   work moved to its subtasks), so it never appears in the dated/undated
+   lists on its own. Surfacing a read-only copy here, right above whichever
+   tab its subtasks landed in, keeps the parent visible next to the pieces
+   it was broken into instead of only being findable by digging through the
+   Done tab. */
+function parentsSurfacedIn(list){
+  const parentIds = new Set();
+  for(const c of list){ if(c.parentId) parentIds.add(c.parentId); }
+  return [...parentIds].map(pid=>state.defs.find(d=>d.id===pid)).filter(Boolean);
+}
+function splitParentRowHtml(p){
+  const childCount = state.defs.filter(x=>x.parentId===p.id).length;
+  return `<div class="card def2-card" data-def2="${p.id}" data-hasestimate="${p.estimatedMinutes?'1':'0'}" data-owner="${escapeHtml(p.owner||'')}" style="cursor:pointer; opacity:0.75; border-style:dashed;">
+    <div class="row"><div>
+      <div class="item-name">${escapeHtml(p.description)}</div>
+      <div class="item-meta">${escapeHtml(p.location||'—')} · split into ${childCount} subtask${childCount===1?'':'s'}</div>
+    </div><span class="stamp open">Split</span></div>
+  </div>`;
 }
 
 function defRowDone(d){
