@@ -546,10 +546,15 @@ function estimateOptionsHtml(selected){
    so it never re-asks for this same item again. No AI involved by design —
    Josh names and sizes the subtasks himself, on the spot. */
 function subtaskRowHtml(n){
-  return `<div class="row subtask-row" style="gap:6px; margin-top:6px;">
-    <input type="text" class="subtask-text" placeholder="Subtask ${n}" style="flex:1;">
-    <select class="subtask-minutes">${estimateOptionsHtml()}</select>
-    <input type="date" class="subtask-due" title="Due date — leave blank to auto-spread">
+  // Stacked, not a 3-across flex row — cramming a free-text field next to
+  // two short controls fought the global width:100% on every input and
+  // squeezed the text field down to ~20px, so typing was invisible.
+  return `<div class="subtask-row" style="margin-top:12px; padding-top:10px; border-top:1px solid var(--line);">
+    <input type="text" class="subtask-text" placeholder="Subtask ${n}" style="margin-top:0;">
+    <div class="row" style="gap:6px; margin-top:6px;">
+      <select class="subtask-minutes" style="margin-top:0;">${estimateOptionsHtml()}</select>
+      <input type="date" class="subtask-due" title="Due date — leave blank to auto-spread" style="margin-top:0;">
+    </div>
   </div>`;
 }
 function openSubtaskPromptModal(defId, onDone){
@@ -576,10 +581,18 @@ function openSubtaskPromptModal(defId, onDone){
       dueDate: row.querySelector('.subtask-due').value || null
     })).filter(s=>s.text);
     if(!subtasks.length){ showToast('Add at least one subtask, or tap Not Now.'); return; }
-    await splitDefIntoSubtasks(defId, subtasks);
+    const created = await splitDefIntoSubtasks(defId, subtasks);
     closeModal();
-    showToast(`Split into ${subtasks.length} subtask${subtasks.length===1?'':'s'}.`);
-    onDone();
+    showToast(`Split into ${created.length} subtask${created.length===1?'':'s'} — showing them below.`);
+    // Always surface the freshly created subtasks directly on the
+    // Deficiencies tab, regardless of where this was triggered from
+    // (Add/Edit/manual) - otherwise they can land wherever their due date
+    // put them with nothing indicating anything happened, which was the
+    // whole point of fixing this.
+    activeTab = 'defs';
+    defsFilterTab = created.some(c=>c.dueDate) ? 'dated' : 'undated';
+    document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.toggle('active', x.dataset.tab==='defs'));
+    render();
   };
   document.getElementById('skipSubtasks').onclick = async()=>{
     await dismissSubtaskPrompt(defId);
@@ -665,6 +678,7 @@ function openEditDefModal(defId, onSaved){
       <input id="edNewNote" type="text" placeholder="Add a note…" style="flex:1;">
       <button class="btn small" id="edAddNote">Add</button>
     </div>
+    ${d.status!=='Done' ? `<button class="btn small ghost" id="edBreakDown" style="width:100%; margin-top:10px;">Break Into Subtasks</button>` : ''}
     <div id="edOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="edSave" style="width:100%;">Save Changes</button>
@@ -679,6 +693,8 @@ function openEditDefModal(defId, onSaved){
     document.getElementById('edNewNote').value = '';
     document.getElementById('edNotesList').innerHTML = notesListHtml(d.notes);
   };
+  const breakDownBtn = document.getElementById('edBreakDown');
+  if(breakDownBtn) breakDownBtn.onclick = ()=>openSubtaskPromptModal(d.id, ()=>render());
   document.getElementById('edSave').onclick = async()=>{
     const desc = document.getElementById('edDesc').value.trim();
     if(!desc){ showToast('Description cannot be empty.'); return; }
@@ -1479,11 +1495,26 @@ function applyDefSearchFilter(){
   });
 }
 
+/* Makes the parent<->subtask link visible right on the list row, in
+   whichever tab either one happens to land in — otherwise a subtask is
+   just an ordinary-looking item with no visible trace of what it's part
+   of, and a split parent (always Done, so always on the Done tab) shows
+   nothing beyond its own description even though it's the reason the
+   subtasks exist. */
+function subtaskLineageTag(d){
+  if(d.parentId){
+    const parent = state.defs.find(x=>x.id===d.parentId);
+    if(parent) return ` · ↳ part of: ${escapeHtml(parent.description)}`;
+  }
+  const childCount = state.defs.filter(x=>x.parentId===d.id).length;
+  return childCount>0 ? ` · split into ${childCount} subtask${childCount===1?'':'s'}` : '';
+}
+
 function defRowDone(d){
   return `<div class="card done def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" data-owner="${escapeHtml(d.owner||'')}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}${categoryTag(d)}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}${categoryTag(d)}${subtaskLineageTag(d)}</div>
     </div><span class="stamp done">Done</span></div>
   </div>`;
 }
@@ -1494,7 +1525,7 @@ function defRowWithActions(d, showDatePicker){
   return `<div class="card ${st} def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" data-owner="${escapeHtml(d.owner||'')}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${priorityTag(d)}${categoryTag(d)}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${priorityTag(d)}${categoryTag(d)}${subtaskLineageTag(d)}</div>
     </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
     ${showDatePicker ? `<div class="row" style="margin-top:8px; gap:6px;">
       <input type="date" class="def-quickdate" style="margin-top:0;">
