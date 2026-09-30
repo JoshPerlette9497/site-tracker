@@ -80,11 +80,26 @@
   .btn{
     background:var(--brand-dark); color:#fff; border:none; border-radius:8px;
     padding:9px 14px; font-size:13px; font-weight:700; cursor:pointer;
+    transition:transform 0.08s ease, filter 0.08s ease, background 0.08s ease, opacity 0.08s ease;
   }
   .btn.small{padding:6px 10px; font-size:12px;}
   .btn.ghost{background:transparent; border:1px solid var(--ink-dim); color:var(--ink-dim);}
   .btn.danger{background:var(--stamp-red);}
   .btn.done-btn{background:var(--stamp-green);}
+  /* -webkit-tap-highlight-color is disabled above (its native flash clashes
+     with this app's own colors), which left taps with no visible cue that
+     anything happened - a tap read as "did that work?" and got repeated,
+     producing duplicate deficiencies/notes/subtasks. These give every
+     button and clickable row an immediate, deliberate press effect. */
+  .btn:active{transform:scale(0.95); filter:brightness(0.85);}
+  .btn.ghost:active{background:rgba(92,119,120,0.15);}
+  .btn:disabled{opacity:0.55; cursor:not-allowed; transform:none; filter:none;}
+  .capture-fab{transition:transform 0.08s ease, filter 0.08s ease;}
+  .capture-fab:active{transform:scale(0.92); filter:brightness(0.85);}
+  nav.tabs button{transition:background 0.08s ease;}
+  nav.tabs button:active{background:#E1EFEF;}
+  .card[style*="cursor:pointer"]{transition:transform 0.08s ease, filter 0.08s ease;}
+  .card[style*="cursor:pointer"]:active{transform:scale(0.98); filter:brightness(0.95);}
   input,select,textarea{
     width:100%; background:#fff; border:1px solid var(--line);
     color:var(--ink); border-radius:7px; padding:9px 10px; font-size:14px; margin-top:6px;
