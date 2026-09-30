@@ -30,6 +30,24 @@ new MutationObserver((mutations)=>{
   }
 }).observe(document.body, {childList:true, subtree:true});
 
+/* ---------- prevent duplicate taps from creating duplicate data ----------
+   The CSS press-state (style.css) gives every tap a visible cue, but a
+   save handler that awaits a Supabase write and then closes a modal still
+   takes a moment - long enough that an unsure tap gets repeated before
+   anything visibly changes, producing duplicate deficiencies, notes,
+   subtasks, etc. Disabling any clicked button briefly blocks a rapid
+   repeat tap on that same button without needing to touch the dozens of
+   individual onclick handlers across this app: setting `disabled` here,
+   in the capture phase, does not cancel the click event already being
+   dispatched - only future ones - so the button's own handler still runs
+   to completion for the tap that triggered it. */
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest('button');
+  if(!btn || btn.disabled) return;
+  btn.disabled = true;
+  setTimeout(()=>{ if(document.body.contains(btn)) btn.disabled = false; }, 500);
+}, true);
+
 /* ---------- tabs ---------- */
 document.querySelectorAll('nav.tabs button').forEach(b=>{
   b.onclick = ()=>{
