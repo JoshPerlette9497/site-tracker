@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>QC Walkthrough</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="QC Walk">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b5cff">
+<link rel="apple-touch-icon" id="touchIcon" href="data:,">
+<link rel="manifest" id="manifestLink" href="data:,">
+<style>
+:root{
+  --bg:#eef0f3;--card:#fff;--fg:#0b0d10;--mut:#454d5a;--bd:#aab2bf;--pri:#0b4fd6;--priFg:#fff;
+  --pass:#15803d;--def:#c4161c;--na:#586070;--warn:#8a5a00;--chip:#e3e7ee;--overlay:rgba(0,0,0,.6);
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#0d1014;--card:#1a1f27;--fg:#f4f6f9;--mut:#b9c1ce;--bd:#475161;--pri:#4d8dff;--priFg:#06122a;
+  --pass:#1f9d4d;--def:#d92d33;--na:#6b7384;--warn:#e0a526;--chip:#2a313c;}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.35 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;
+  padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+button,input,select,textarea{font:inherit;color:inherit}
+#app{max-width:680px;margin:0 auto}
+.bar{position:sticky;top:0;z-index:20;background:var(--card);border-bottom:2px solid var(--bd);
+  padding:calc(8px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) 8px calc(10px + env(safe-area-inset-left));
+  display:flex;align-items:center;gap:8px}
+.bar h1{font-size:19px;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .sub{font-size:13px;color:var(--mut);font-weight:400;display:block}
+.wrap{padding:12px calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left))}
+.btn{min-height:48px;min-width:48px;padding:8px 14px;border-radius:10px;border:2px solid var(--bd);background:var(--card);
+  font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-align:center}
+button,label,.card.tap,[data-act]{touch-action:manipulation;-webkit-user-select:none;user-select:none}
+.btn:active,.sb button:active,.sec .tg:active,.thumbs button:active{filter:brightness(.8);transform:scale(.96)}
+.card.tap:active{filter:brightness(.92)}
+.btn,.sb button{transition:transform .06s}
+.btn.pri{background:var(--pri);border-color:var(--pri);color:var(--priFg)}
+.btn.danger{color:var(--def);border-color:var(--def)}
+.btn.block{display:flex;width:100%}
+.btn.sm{min-height:44px;padding:6px 10px;font-size:15px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>.grow{flex:1}
+.card{background:var(--card);border:2px solid var(--bd);border-radius:12px;padding:12px;margin:0 0 10px}
+.card.tap{cursor:pointer}
+.card h3{margin:0 0 2px;font-size:18px}
+.muted{color:var(--mut);font-size:14px}
+.pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.pill{background:var(--chip);border-radius:99px;padding:2px 10px;font-size:14px;font-weight:600}
+.pill.d{background:var(--def);color:#fff}
+.pill.ok{background:var(--pass);color:#fff}
+.prog{height:10px;background:var(--chip);border-radius:6px;overflow:hidden;margin-top:8px}
+.prog>i{display:block;height:100%;background:var(--pass)}
+label.f{display:block;margin:0 0 10px;font-weight:600;font-size:15px}
+input[type=text],input[type=date],textarea{display:block;width:100%;margin-top:4px;min-height:48px;padding:10px;border:2px solid var(--bd);
+  border-radius:10px;background:var(--bg);font-weight:400}
+textarea{min-height:90px;resize:vertical}
+h2{font-size:15px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:18px 2px 8px}
+.sec{display:flex;align-items:center;gap:8px;margin:16px 0 8px}
+.sec button.tg{flex:1;text-align:left;min-height:48px;background:none;border:0;font-weight:700;font-size:16px;padding:0 2px}
+.item{background:var(--card);border:2px solid var(--bd);border-left-width:8px;border-radius:12px;padding:10px;margin:0 0 10px}
+.item.pass{border-left-color:var(--pass)}.item.def{border-left-color:var(--def)}.item.na{border-left-color:var(--na)}
+.item .nm{font-weight:700;font-size:18px}
+.item .ck{font-size:14px;color:var(--mut);margin:2px 0}
+.sb{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:6px;margin-top:8px}
+.sb button{min-height:56px;border-radius:10px;font-weight:700;font-size:16px;border:3px solid;background:var(--card);cursor:pointer}
+.sb .p{color:var(--pass);border-color:var(--pass)}.sb .d{color:var(--def);border-color:var(--def)}.sb .n{color:var(--na);border-color:var(--na)}
+.sb .p.on{background:var(--pass);color:#fff}.sb .d.on{background:var(--def);color:#fff}.sb .n.on{background:var(--na);color:#fff}
+.defp{margin-top:10px;padding:10px;border:2px dashed var(--def);border-radius:10px}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.thumbs img{width:84px;height:84px;object-fit:cover;border-radius:8px;border:2px solid var(--bd);display:block}
+.thumbs button{padding:0;border:0;background:none}
+.tabs{display:flex;gap:8px}
+.ovl{position:fixed;inset:0;background:var(--overlay);z-index:50;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--card);width:100%;max-width:680px;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));max-height:85vh;overflow:auto}
+.sheet h3{margin:0 0 10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.viewer{position:fixed;inset:0;z-index:60;background:#000;display:flex;flex-direction:column}
+.viewer .img{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.viewer img{max-width:100%;max-height:100%;object-fit:contain}
+.viewer .vb{display:flex;gap:8px;padding:10px 10px calc(10px + env(safe-area-inset-bottom));background:#111}
+.viewer .vb .btn{flex:1;background:#222;color:#fff;border-color:#555}
+#toast{position:fixed;left:10px;right:10px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:80;max-width:660px;margin:0 auto;
+  background:#111;color:#fff;border:2px solid #fff;border-radius:12px;padding:10px 12px;display:none;align-items:center;gap:10px}
+#toast.err{background:var(--def)}
+#toast span{flex:1}
+#toast button{min-height:44px;border-radius:8px;border:2px solid #fff;background:transparent;color:#fff;font-weight:700;padding:0 12px}
+#busy{position:fixed;inset:0;z-index:90;background:var(--overlay);display:none;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:20px}
+.empty{text-align:center;color:var(--mut);padding:30px 10px}
+.hint{background:var(--chip);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal"></div>
+<div id="toast"><span></span><button type="button"></button></div>
+<div id="busy"></div>
+<input type="file" id="cam" accept="image/*" capture="environment" hidden>
+<input type="file" id="imp" accept="application/json,.json" hidden>
+<datalist id="trades"><option>Framing</option><option>Drywall</option><option>Paint</option><option>Flooring</option><option>Tile</option><option>Trim / finish carpentry</option><option>Cabinets</option><option>Plumbing</option><option>Electrical</option><option>HVAC</option><option>Windows / doors</option><option>Cleaning</option><option>Appliances</option></datalist>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" async></script>
+<script>
+"use strict";
+/* ============ CHECKLIST TEMPLATES (edit freely) ============
+   Item format: [name, what to check, method].  "(each)" in a name adds a "+ add another" button.
+   Existing inspections keep their own copy, so editing this does not change them. */
+const TEMPLATES = {
+  base: [
+    ["Ceiling","Flat, no nail pops, cracks, tape lines; texture consistent; paint coverage","Visual, raking light"],
+    ["Walls","No nail pops, dents, cracks, tape lines, sanding marks; paint coverage; cut lines clean","Visual, raking light"],
+    ["Corners and beads","Straight, no cracking or dents","Visual"],
+    ["Floor covering","No scratches, gaps, lifting, separating seams, squeaks or dips; transitions secure","Walk full floor, listen"],
+    ["Baseboard and trim","Tight to wall and floor; joints closed; nailed and filled; caulked; painted","Visual"],
+    ["Door (each)","Swings freely, latches, stays where left; even gaps; no binding; stops installed; hardware tight; no damage","Operate"],
+    ["Door casing","Joints tight, reveals even, caulked, painted","Visual"],
+    ["Closet (if present)","Shelving and rod secure; bifold or slider tracks; door aligned","Operate"],
+    ["Window (each)","Opens and closes fully; locks engage; screen present and undamaged; glass clean and unscratched; seal intact; no condensation between panes","Operate every sash"],
+    ["Window trim / sill","Returns finished, caulked, no gaps or damage","Visual"],
+    ["Outlet (each)","Correct polarity and ground; cover plate straight and tight; flush to wall","Outlet tester"],
+    ["Switch (each)","Operates its fixture; plate straight and tight","Operate"],
+    ["Light fixture (each)","Works; secure to ceiling or wall; no gaps; bulbs and covers in","Operate"],
+    ["Smoke / CO alarm","Present where required, secure, tested, not chirping","Test button"],
+    ["Heat register / return (each)","Present, secure, damper works, air flowing, no debris","Hand or thermal camera"],
+    ["Thermostat / controls (if present)","Level, secure, functional","Operate"],
+    ["Low-voltage (if present)","Data, TV and doorbell plates installed","Visual"],
+    ["General cleanliness","No debris, paint splatter, labels or protective film left","Visual"]
+  ],
+  rooms: {
+    kitchen: { label:"Kitchen", prefix:"Kitchen", items:[
+      ["Countertops","No chips, cracks or scratches; seams tight and colour-matched; level; edges finished; backsplash caulked"],
+      ["Cabinets (each door and drawer)","Doors aligned and level; even reveals; soft-close works; drawers run smooth; no damage; handles straight and tight"],
+      ["Cabinet interiors and end panels","Clean; shelves and pins in; no damage; end panels and fillers secured"],
+      ["Backsplash tile","Grout full and consistent; no lippage; cut edges clean; outlets flush"],
+      ["Sink","Secure; supported or strapped (undermount); no chips; sealed to counter"],
+      ["Faucet","Hot and cold on correct sides; pull-out retracts; no drips; aerator clean; base sealed"],
+      ["Under-sink","Shut-offs work; no leaks after running; drain and trap tight"],
+      ["Dishwasher","Runs a cycle; door stays open and closes; anchored; no leaks; high loop or air gap; toe kick on"],
+      ["Range / cooktop / oven","Every burner and element works; oven heats; anti-tip bracket installed; level"],
+      ["Hood fan / OTR microwave","Fan and light work at all speeds; ducted to exterior; duct sealed in cabinet"],
+      ["Microwave","Heats; door and turntable work"],
+      ["Refrigerator","Cools; doors aligned; water/ice works if plumbed; no leak at supply"],
+      ["Counter outlets","GFCI protected and trips"],
+      ["Pantry","Shelving secure; door aligned"]
+    ]},
+    bathroom: { label:"Bathroom / ensuite / powder room", prefix:"Bathroom", items:[
+      ["Vanity and top","Level, secure; doors and drawers aligned; top sealed to wall"],
+      ["Sink and faucet","Hot and cold correct; no drips; pop-up works; drains freely"],
+      ["Toilet","Secure (no rock); tank tight; flushes and refills; no running; caulked at base; seat tight"],
+      ["Tub / shower","Fill and drain test; no leaks; valve temp correct; diverter works; surround and caulking complete; no chips"],
+      ["Shower door / rod","Operates, sealed, no leaks"],
+      ["Tile (floor and walls)","Grout full; no cracks or lippage; transitions clean"],
+      ["Exhaust fan","Runs; adequate draw; vents to exterior (not soffit); quiet"],
+      ["GFCI outlets","Present and trips"],
+      ["Mirror","Secure, no damage"],
+      ["Accessories","Towel bars, TP holder and hooks secure and level"]
+    ]},
+    bedroom: { label:"Bedroom", prefix:"Bedroom", items:[
+      ["Closet","Shelving and rod secure; doors operate"],
+      ["Egress window","Opens fully; meets egress size; guard where required"],
+      ["Carpet","Seams invisible; stretched tight; tucked at transitions"]
+    ]},
+    laundry: { label:"Laundry (room or closet)", prefix:"Laundry", items:[
+      ["Washer","Runs; no leaks at hoses; level"],
+      ["Dryer","Heats; vent connected and runs to exterior; rigid or approved duct"],
+      ["Floor drain or pan","Present if specified; clear of debris"],
+      ["Shut-off valves","Accessible; operate"]
+    ]},
+    stairs: { label:"Stairs and halls", prefix:"Stairs", items:[
+      ["Treads and risers","Consistent heights; no squeaks; nosings secure; carpet tight"],
+      ["Handrail","Continuous; secure; correct height; returns at ends"],
+      ["Guards","Secure; correct height; spacing meets code"],
+      ["Stairwell walls and lighting","Switches at top and bottom; light works"]
+    ]},
+    entry: { label:"Entry / foyer", prefix:"Entry", items:[
+      ["Exterior door","Locks and deadbolt work; weatherstripping sealed (no light); threshold sealed; closes tight"],
+      ["Doorbell","Works"],
+      ["Entry closet","As base template"]
+    ]},
+    mech: { label:"Mechanical / utility room", prefix:"Mechanical", items:[
+      ["Furnace","Fires and holds temp without short cycling; filter installed; condensate drain routed to floor drain; panels on; service sticker"],
+      ["Humidifier","Water line not leaking; shut-off works"],
+      ["HRV / ventilation fan","Runs; balanced; ducts connected"],
+      ["Water heater","Operates; wired or fired; T&P line to floor; no rust or leaks; venting correct"],
+      ["Main water shut-off","Located, labelled, operates"],
+      ["Floor drain","Clear, primed, no debris"],
+      ["Radon rough-in","Capped and labelled"],
+      ["Exterior hose bib shut-offs","Located, labelled"],
+      ["Ductwork","Sealed, secured; no whistling or noise"]
+    ]},
+    den: { label:"Den / flex / living / dining", prefix:"Den", items:[], hint:"Base items only. Use \"+ custom item\" for built-ins, a fireplace or feature walls." }
+  }
+};
+
+/* ============ helpers ============ */
+const $ = s => document.querySelector(s);
+const app = $('#app');
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)+Math.random().toString(36).slice(2,10));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
+const slug = s => String(s||'').normalize('NFKD').replace(/[^\w]+/g,'').slice(0,40);
+const STATUS = {unchecked:'Unchecked', pass:'Pass', def:'Deficiency', na:'N/A'};
+
+let db = null, cur = null, curRoomId = null, screen = 'list';
+const photoCache = new Map();           // id -> {id,itemId,blob,url,createdAt}
+const ui = { hidePassed:false, collapsed:{}, detailsOpen:null };
+
+/* ============ toast / busy / modal ============ */
+let toastTimer;
+function toast(msg, opts={}) {
+  const t = $('#toast'), b = t.querySelector('button');
+  t.querySelector('span').textContent = msg;
+  t.className = opts.err ? 'err' : '';
+  t.style.display = 'flex';
+  if (opts.action) { b.style.display=''; b.textContent = opts.action; b.onclick = () => { t.style.display='none'; opts.onAction(); }; }
+  else { b.style.display = 'none'; }
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.style.display='none', opts.ms || (opts.err ? 9000 : opts.action ? 12000 : 2500));
+}
+const busy = msg => { const b=$('#busy'); b.textContent = msg||''; b.style.display = msg ? 'flex' : 'none'; };
+function modal(html) {
+  const m = $('#modal');
+  m.innerHTML = html ? `<div class="ovl" data-act="closeModal"><div class="sheet" data-stop>${html}</div></div>` : '';
+}
+function storageFail(e) {
+  console.error(e);
+  const full = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message||''));
+  toast(full ? 'Storage is FULL. Export a backup, then delete old inspections.'
+             : 'Could not save to device storage: ' + (e && e.message || e) + '. Export a backup now.', {err:true, ms:15000});
+}
+
+/* ============ IndexedDB ============ */
+function openDB() {
+  return new Promise((res, rej) => {
+    if (!window.indexedDB) return rej(new Error('IndexedDB not available (private browsing?)'));
+    const r = indexedDB.open('qc-walkthrough', 1);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      d.createObjectStore('inspections', {keyPath:'id'});
+      d.createObjectStore('photos', {keyPath:'id'}).createIndex('inspectionId','inspectionId');
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.onblocked = () => rej(new Error('Database blocked by another tab'));
+  });
+}
+const reqP = r => new Promise((res,rej) => { r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+const txDone = t => new Promise((res,rej) => { t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error||new Error('Storage write aborted')); });
+async function dbPut(store, val) { const t = db.transaction(store,'readwrite'); t.objectStore(store).put(val); await txDone(t); }
+async function dbGetAll(store) { return reqP(db.transaction(store).objectStore(store).getAll()); }
+async function dbDel(store, key) { const t = db.transaction(store,'readwrite'); t.objectStore(store).delete(key); await txDone(t); }
+async function photosOf(inspectionId) { return reqP(db.transaction('photos').objectStore('photos').index('inspectionId').getAll(inspectionId)); }
+async function deleteInspectionPhotos(inspectionId) {
+  const keys = await reqP(db.transaction('photos').objectStore('photos').index('inspectionId').getAllKeys(inspectionId));
+  const t = db.transaction('photos','readwrite');
+  keys.forEach(k => t.objectStore('photos').delete(k));
+  await txDone(t);
+}
+
+/* autosave */
+let dirty = false, saveTimer = null, saveChain = Promise.resolve();
+function queueSave() { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flush, 350); }
+function flush() {
+  clearTimeout(saveTimer);
+  if (!dirty || !cur) return saveChain;
+  dirty = false; cur.updatedAt = Date.now();
+  const snap = JSON.parse(JSON.stringify(cur));
+  saveChain = saveChain.then(() => dbPut('inspections', snap)).catch(storageFail);
+  return saveChain;
+}
+const saveNow = () => { queueSave(); return flush(); };
+addEventListener('pagehide', flush);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+
+/* ============ model ============ */
+function mkItem(key, [n, c, m], group) {
+  const each = /\(each/i.test(n);
+  const name = n.replace(/\s*\(each[^)]*\)/i, '');
+  return { id:uid(), templateKey:key, name: each ? name+' 1' : name, check:c||'', method:m||'', group, each,
+           status:'unchecked', note:'', trade:'', photoIds:[] };
+}
+function nextRoomName(insp, type) {
+  const prefix = TEMPLATES.rooms[type].prefix;
+  let n = insp.rooms.filter(r => r.type === type).length + 1;
+  while (insp.rooms.some(r => r.name === prefix+' '+n)) n++;
+  return prefix + ' ' + n;
+}
+function mkRoom(insp, type) {
+  const t = TEMPLATES.rooms[type];
+  const items = TEMPLATES.base.map(i => mkItem('base:'+i[0], i, 'base'))
+    .concat(t.items.map(i => mkItem(type+':'+i[0], i, 'room')));
+  return { id:uid(), type, name:nextRoomName(insp, type), order:0, items };
+}
+const reorder = insp => insp.rooms.forEach((r,i) => r.order = i);
+const findRoom = id => cur && cur.rooms.find(r => r.id === id);
+function findItem(id) { for (const r of cur.rooms) { const i = r.items.find(x => x.id === id); if (i) return {room:r, item:i}; } return null; }
+function stats(items) {
+  const s = {t:items.length, c:0, d:0, p:0, n:0};
+  for (const i of items) { if (i.status==='pass') {s.p++; s.c++;} else if (i.status==='def') {s.d++; s.c++;} else if (i.status==='na') {s.n++; s.c++;} }
+  return s;
+}
+const inspStats = i => stats(i.rooms.flatMap(r => r.items));
+const statLine = s => `${s.c}/${s.t} checked` + (s.d ? `, ${s.d} deficienc${s.d===1?'y':'ies'}` : '');
+const pct = s => s.t ? Math.round(s.c/s.t*100) : 0;
+
+async function loadInspection(id) {
+  const all = await dbGetAll('inspections');
+  cur = all.find(i => i.id === id) || null;
+  photoCache.forEach(p => URL.revokeObjectURL(p.url)); photoCache.clear();
+  if (!cur) return;
+  for (const p of await photosOf(id)) photoCache.set(p.id, {...p, url:URL.createObjectURL(p.blob)});
+}
+
+/* ============ photos ============ */
+async function loadBitmap(blob) {
+  try { const b = await createImageBitmap(blob, {imageOrientation:'from-image'}); return {src:b, w:b.width, h:b.height}; } catch (_) {}
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise((res,rej) => { const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('Could not read image')); i.src=url; });
+    return {src:img, w:img.naturalWidth, h:img.naturalHeight};
+  } finally { URL.revokeObjectURL(url); }
+}
+async function resizeImage(blob, max=1600, q=0.75) {
+  const {src, w, h} = await loadBitmap(blob);
+  const k = Math.min(1, max / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w*k); c.height = Math.round(h*k);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0,0,c.width,c.height); g.drawImage(src, 0, 0, c.width, c.height);
+  if (src.close) src.close();
+  const out = await new Promise(res => c.toBlob(res, 'image/jpeg', q));
+  if (!out) throw new Error('Could not encode photo');
+  return {blob: out, w:c.width, h:c.height};
+}
+let pendingItemId = null;
+$('#cam').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file || !pendingItemId) return;
+  const found = findItem(pendingItemId); if (!found) return;
+  busy('Saving photo…');
+  try {
+    const {blob} = await resizeImage(file);
+    const p = {id:uid(), inspectionId:cur.id, itemId:found.item.id, blob, createdAt:Date.now()};
+    await dbPut('photos', p);
+    found.item.photoIds.push(p.id);
+    photoCache.set(p.id, {...p, url:URL.createObjectURL(blob)});
+    await saveNow();
+    render(true);
+    toast('Photo added', {action:'Save to Photos', onAction:()=>sharePhoto(p.id)});
+  } catch (err) { storageFail(err); }
+  finally { busy(''); }
+});
+function photoFile(id) {
+  const p = photoCache.get(id), f = findItem(p.itemId);
+  const n = f ? f.item.photoIds.indexOf(id)+1 : 1;
+  const name = [slug(cur.unit)||'Unit', f&&slug(f.room.name), f&&slug(f.item.name), n].filter(Boolean).join('_') + '.jpg';
+  return new File([p.blob], name, {type:'image/jpeg'});
+}
+function downloadFile(file) {
+  const url = URL.createObjectURL(file), a = document.createElement('a');
+  a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+async function sharePhoto(id) {
+  const f = photoFile(id);
+  try { if (navigator.canShare && navigator.canShare({files:[f]})) { await navigator.share({files:[f]}); return; } }
+  catch (e) { if (e.name === 'AbortError') return; }
+  downloadFile(f);
+}
+async function saveAllPhotos() {
+  const ids = []; cur.rooms.forEach(r => r.items.forEach(i => i.photoIds.forEach(id => photoCache.has(id) && ids.push(id))));
+  if (!ids.length) return toast('No photos in this inspection yet');
+  const files = ids.map(photoFile);
+  try { if (navigator.canShare && navigator.canShare({files})) { await navigator.share({files}); return; } }
+  catch (e) { if (e.name === 'AbortError') return; }
+  toast('Downloading ' + files.length + ' photos…');
+  for (const f of files) { downloadFile(f); await new Promise(r => setTimeout(r, 350)); }
+}
+async function deletePhotos(ids) {
+  for (const id of ids) {
+    try { await dbDel('photos', id); } catch (e) { storageFail(e); }
+    const p = photoCache.get(id); if (p) URL.revokeObjectURL(p.url); photoCache.delete(id);
+  }
+}
+
+/* ============ sharing / delivering files ============ */
+async function deliver(file) {
+  try {
+    if (navigator.canShare && navigator.canShare({files:[file]})) { await navigator.share({files:[file], title:file.name}); return; }
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    if (e.name === 'NotAllowedError') { // gesture expired after async work: ask for a fresh tap
+      window._pend = file;
+      modal(`<h3>${esc(file.name)} is ready</h3><div class="grid"><button class="btn pri" data-act="pendShare">Share…</button><button class="btn" data-act="pendDl">Download</button></div>`);
+      return;
+    }
+    console.warn(e);
+  }
+  downloadFile(file);
+}
+
+/* ============ PDF ============ */
+const pdfImgCache = new Map();
+async function pdfImg(id) {
+  if (pdfImgCache.has(id)) return pdfImgCache.get(id);
+  const {blob} = photoCache.get(id);
+  const r = await resizeImage(blob, 1000, 0.7);
+  const data = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(r.blob); });
+  const o = {data, w:r.w, h:r.h}; pdfImgCache.set(id, o); return o;
+}
+const pdfClean = s => String(s ?? '').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[–—]/g,'-').replace(/…/g,'...').replace(/[^\x09\x0A\x20-\xFF]/g,'?');
+async function buildPDF(kind) {
+  const J = window.jspdf && window.jspdf.jsPDF;
+  if (!J) throw new Error('PDF library not loaded. Connect to the internet once and try again.');
+  const doc = new J({unit:'mm', format:'letter'});
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 14, CW = W - 2*M;
+  let y = M;
+  const need = h => { if (y + h > H - 16) { doc.addPage(); y = M; } };
+  const color = c => doc.setTextColor(c[0], c[1], c[2]);
+  const COL = {pass:[21,128,61], def:[196,22,28], na:[88,96,112], unchecked:[138,90,0]};
+  function para(str, x, w, size, bold, col) {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size); color(col || [0,0,0]);
+    const lh = size * 0.3528 * 1.3;
+    for (const line of doc.splitTextToSize(pdfClean(str), w)) { need(lh); doc.text(line, x, y + lh*0.8); y += lh; }
+  }
+  const full = kind === 'full';
+  const rooms = cur.rooms;
+  const all = inspStats(cur);
+
+  // header block
+  doc.setFillColor(20, 30, 50); doc.rect(0, 0, W, 30, 'F');
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(18);
+  doc.text(full ? 'QC Inspection - Full Report' : 'QC Inspection - Deficiency List', M, 13);
+  doc.setFont('helvetica','normal'); doc.setFontSize(11);
+  doc.text(pdfClean(cur.site || ''), M, 21); doc.text(pdfClean('Unit: ' + (cur.unit || '')), M, 26.5);
+  y = 36;
+  para('Site: ' + (cur.site||'-'), M, CW, 11, true);
+  para('Unit / address: ' + (cur.unit||'-'), M, CW, 11, true);
+  para('Date: ' + cur.date + '     Inspector: ' + (cur.inspector||'-'), M, CW, 11, true);
+  if (cur.notes) para('Notes: ' + cur.notes, M, CW, 10, false, [60,60,60]);
+  y += 3;
+  para(`Overall: ${statLine(all)}  (${all.p} pass, ${all.d} deficiency, ${all.n} N/A, ${all.t-all.c} unchecked)`, M, CW, 10, false);
+  y += 2;
+
+  // per-room summary
+  need(12); doc.setFont('helvetica','bold'); doc.setFontSize(12); color([0,0,0]); doc.text('Summary by room', M, y+4); y += 7;
+  const cx = [M, M+78, M+108, M+128, M+146, M+164];
+  doc.setFontSize(9); doc.setFillColor(225,229,236); doc.rect(M, y, CW, 6, 'F');
+  ['Room','Checked','Pass','Deficiency','N/A','Open'].forEach((t,i) => doc.text(t, cx[i]+1, y+4.2)); y += 6;
+  doc.setFont('helvetica','normal');
+  for (const r of rooms) {
+    const s = stats(r.items); need(6);
+    color(s.d ? COL.def : [0,0,0]);
+    [r.name, `${s.c}/${s.t}`, s.p, s.d, s.n, s.t-s.c].forEach((t,i) => doc.text(pdfClean(t), cx[i]+1, y+4.2));
+    doc.setDrawColor(200,204,212); doc.line(M, y+6, M+CW, y+6); y += 6;
+  }
+  y += 5;
+
+  async function photosBlock(item) {
+    const ids = item.photoIds.filter(id => photoCache.has(id));
+    const gap = 3, iw = (CW - 2*gap) / 3, maxH = 62;
+    for (let i = 0; i < ids.length; i += 3) {
+      const imgs = []; for (const id of ids.slice(i, i+3)) imgs.push(await pdfImg(id));
+      const dims = imgs.map(m => { let w = iw, h = iw*m.h/m.w; if (h > maxH) { h = maxH; w = h*m.w/m.h; } return {w,h}; });
+      const rowH = Math.max(...dims.map(d => d.h));
+      need(rowH + 3);
+      imgs.forEach((m,k) => doc.addImage(m.data, 'JPEG', M + k*(iw+gap), y, dims[k].w, dims[k].h));
+      y += rowH + 3;
+    }
+  }
+  async function defBlock(item, indent) {
+    para('Fix: ' + (item.note || '(no description)'), M+indent, CW-indent, 10, false);
+    if (item.trade) para('Trade: ' + item.trade, M+indent, CW-indent, 10, true, [40,40,40]);
+    y += 1; await photosBlock(item);
+  }
+  function roomHead(r) {
+    need(20); y += 2;
+    doc.setFillColor(225,229,236); doc.rect(M, y, CW, 7.5, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(12); color([0,0,0]);
+    doc.text(pdfClean(r.name), M+2, y+5.3);
+    const s = stats(r.items); doc.setFontSize(9); doc.setFont('helvetica','normal');
+    doc.text(pdfClean(statLine(s)), M+CW-2, y+5.2, {align:'right'}); y += 10;
+  }
+
+  if (!full) {
+    const withDef = rooms.filter(r => r.items.some(i => i.status === 'def'));
+    need(10); doc.setFont('helvetica','bold'); doc.setFontSize(14); color([0,0,0]);
+    doc.text(`Deficiencies (${all.d})`, M, y+5); y += 9;
+    if (!withDef.length) para('No deficiencies recorded.', M, CW, 11, false);
+    for (const r of withDef) {
+      roomHead(r);
+      let n = 0;
+      for (const it of r.items.filter(i => i.status === 'def')) {
+        n++; need(24);
+        para(`${n}. ${it.name}`, M, CW, 11.5, true, COL.def);
+        await defBlock(it, 5); y += 2;
+      }
+    }
+  } else {
+    for (const r of rooms) {
+      roomHead(r);
+      for (const it of r.items) {
+        const lbl = it.status === 'unchecked' ? 'NOT CHECKED' : (STATUS[it.status]).toUpperCase();
+        need(it.status === 'def' ? 24 : 6);
+        doc.setFont('helvetica','bold'); doc.setFontSize(8.5); color(COL[it.status]); doc.text(lbl, M+1, y+4);
+        const sy = y; y = sy; para(it.name, M+27, CW-27, 10, it.status === 'def', [0,0,0]);
+        if (y < sy + 5.5) y = sy + 5.5;
+        if (it.status === 'def') { await defBlock(it, 27); y += 1; }
+      }
+    }
+  }
+  // footers
+  const n = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i); doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(100,100,100);
+    doc.text(pdfClean(`${cur.site || ''} ${cur.unit || ''} - ${cur.date}`.trim()), M, H-8);
+    doc.text(`Page ${i} of ${n}`, W-M, H-8, {align:'right'});
+  }
+  const base = `QC_${slug(cur.unit) || 'Unit'}_${cur.date}`;
+  return new File([doc.output('blob')], full ? base + '.pdf' : base + '_Deficiencies.pdf', {type:'application/pdf'});
+}
+async function exportPDF(kind) {
+  await flush();
+  busy('Building PDF…');
+  let file;
+  try { file = await buildPDF(kind); } catch (e) { busy(''); console.error(e); return toast('PDF failed: ' + e.message, {err:true}); }
+  busy('');
+  await deliver(file);
+}
+
+/* ============ backup / import ============ */
+const blobToDataURL = b => new Promise((res,rej) => { const fr = new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(b); });
+async function exportBackup(onlyId) {
+  busy('Preparing backup…');
+  try {
+    if (cur) await flush();
+    let insps = await dbGetAll('inspections'); if (onlyId) insps = insps.filter(i => i.id === onlyId);
+    const photos = [];
+    for (const i of insps) for (const p of await photosOf(i.id)) photos.push({id:p.id, inspectionId:p.inspectionId, itemId:p.itemId, createdAt:p.createdAt, data:await blobToDataURL(p.blob)});
+    const json = JSON.stringify({format:'qc-backup', version:1, exportedAt:new Date().toISOString(), inspections:insps, photos});
+    const name = onlyId ? `QC_backup_${slug(insps[0].unit)||'unit'}_${today()}.json` : `QC_backup_all_${today()}.json`;
+    busy('');
+    await deliver(new File([json], name, {type:'application/json'}));
+  } catch (e) { busy(''); storageFail(e); }
+}
+$('#imp').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+  busy('Importing…');
+  try {
+    const data = JSON.parse(await file.text());
+    if (data.format !== 'qc-backup') throw new Error('Not a QC backup file');
+    for (const p of data.photos || []) {
+      const blob = await (await fetch(p.data)).blob();
+      await dbPut('photos', {id:p.id, inspectionId:p.inspectionId, itemId:p.itemId, createdAt:p.createdAt, blob});
+    }
+    for (const i of data.inspections || []) await dbPut('inspections', i);
+    toast(`Imported ${data.inspections.length} inspection(s), ${(data.photos||[]).length} photo(s)`);
+    cur = null; await route();
+  } catch (err) { console.error(err); toast('Import failed: ' + err.message, {err:true}); }
+  finally { busy(''); }
+});
+
+/* ============ rendering ============ */
+const topbar = (back, title, sub) => `<div class="bar">${back ? `<button class="btn" data-act="nav" data-to="${back}" aria-label="Back">‹ Back</button>` : ''}
+  <h1>${esc(title)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</h1></div>`;
+const progBar = s => `<div class="prog"><i style="width:${pct(s)}%"></i></div>`;
+
+async function listHTML() {
+  const all = (await dbGetAll('inspections')).sort((a,b) => b.createdAt - a.createdAt);
+  return `${topbar('', 'QC Inspections')}<div class="wrap">
+  <button class="btn pri block" data-act="newInsp" style="margin-bottom:12px">+ New inspection</button>
+  ${all.length ? all.map(i => { const s = inspStats(i); return `<div class="card tap" data-act="nav" data-to="#/i/${i.id}">
+      <h3>${esc(i.unit || '(no unit yet)')}</h3><div class="muted">${esc(i.site || 'No site')} · ${esc(i.date)} · ${esc(i.inspector || '')}</div>
+      <div class="pills"><span class="pill">${i.rooms.length} room${i.rooms.length===1?'':'s'}</span><span class="pill">${statLine(s)}</span>
+      ${s.t && s.c===s.t ? '<span class="pill ok">Complete</span>' : ''}</div>${progBar(s)}</div>`; }).join('')
+    : '<div class="empty">No inspections yet.<br>Tap “New inspection” to start a walkthrough.</div>'}
+  <h2>Backup</h2><div class="row"><button class="btn grow" data-act="backupAll">Export backup (.json)</button>
+  <button class="btn grow" data-act="importPick">Import backup</button></div>
+  <p class="muted">Your data lives only on this device. Export a backup regularly: iOS can clear site data for home-screen apps after long inactivity.</p></div>`;
+}
+
+function inspHTML() {
+  const s = inspStats(cur);
+  const open = ui.detailsOpen === null ? !cur.unit : ui.detailsOpen;
+  return `${topbar('#/', cur.unit || 'New inspection', cur.site)}<div class="wrap">
+  <div class="card"><button class="btn block" data-act="toggleDetails">${open ? '▾' : '▸'} Inspection details</button>
+   ${open ? `<div style="margin-top:10px">
+    <label class="f">Site<input type="text" data-scope="insp" data-f="site" value="${esc(cur.site)}" autocomplete="off"></label>
+    <label class="f">Unit / address<input type="text" data-scope="insp" data-f="unit" value="${esc(cur.unit)}" autocomplete="off"></label>
+    <label class="f">Date<input type="date" data-scope="insp" data-f="date" value="${esc(cur.date)}"></label>
+    <label class="f">Inspector<input type="text" data-scope="insp" data-f="inspector" value="${esc(cur.inspector)}" autocomplete="name"></label>
+    <label class="f">Notes (optional)<textarea data-scope="insp" data-f="notes">${esc(cur.notes)}</textarea></label></div>` : ''}
+  </div>
+  <div class="card"><b>Overall: ${statLine(s)}</b>${progBar(s)}</div>
+  <h2>Rooms</h2>
+  ${cur.rooms.length ? cur.rooms.map((r,idx) => { const rs = stats(r.items); return `<div class="card">
+    <div data-act="nav" data-to="#/i/${cur.id}/r/${r.id}" style="cursor:pointer"><h3>${esc(r.name)}</h3>
+    <div class="muted">${statLine(rs)}</div>
+    <div class="pills">${rs.d ? `<span class="pill d">${rs.d} deficienc${rs.d===1?'y':'ies'}</span>` : ''}${rs.t && rs.c===rs.t ? '<span class="pill ok">Done</span>' : ''}</div>${progBar(rs)}</div>
+    <div class="row" style="margin-top:10px">
+     <button class="btn sm" data-act="roomUp" data-id="${r.id}" ${idx===0?'disabled':''} aria-label="Move up">↑</button>
+     <button class="btn sm" data-act="roomDown" data-id="${r.id}" ${idx===cur.rooms.length-1?'disabled':''} aria-label="Move down">↓</button>
+     <button class="btn sm" data-act="roomRename" data-id="${r.id}">Rename</button>
+     <button class="btn sm" data-act="roomDup" data-id="${r.id}">Duplicate</button>
+     <button class="btn sm danger" data-act="roomDel" data-id="${r.id}">Delete</button></div></div>`; }).join('')
+   : '<div class="empty">No rooms yet. Add rooms to match the house.</div>'}
+  <button class="btn pri block" data-act="addRoom">+ Add room</button>
+  <h2>Export</h2>
+  <div class="row"><button class="btn grow" data-act="pdfDef">Deficiency list PDF</button><button class="btn grow" data-act="pdfFull">Full report PDF</button></div>
+  <div class="row" style="margin-top:8px"><button class="btn grow" data-act="savePhotos">Save all photos</button><button class="btn grow" data-act="backupOne">Backup (.json)</button></div>
+  <h2>Danger zone</h2><button class="btn danger block" data-act="deleteInsp">Delete this inspection</button></div>`;
+}
+
+function photoThumbs(it) {
+  return `<div class="thumbs">${it.photoIds.filter(id => photoCache.has(id)).map(id =>
+    `<button data-act="viewPhoto" data-p="${id}" aria-label="View photo"><img src="${photoCache.get(id).url}" alt="Photo"></button>`).join('')}</div>`;
+}
+function itemHTML(it) {
+  const b = (v, cls, t) => `<button type="button" class="${cls}${it.status===v?' on':''}" data-act="status" data-id="${it.id}" data-v="${v}" aria-pressed="${it.status===v}">${t}</button>`;
+  return `<div class="item ${it.status}" id="it-${it.id}"><div class="nm">${esc(it.name)}</div>
+   ${it.check ? `<div class="ck">${esc(it.check)}</div>` : ''}${it.method ? `<div class="ck"><i>Method: ${esc(it.method)}</i></div>` : ''}
+   <div class="sb">${b('pass','p','Pass')}${b('def','d','Deficiency')}${b('na','n','N/A')}</div>
+   ${it.status === 'def' ? `<div class="defp">
+     <label class="f">What needs to be fixed<textarea data-f="note" data-id="${it.id}" placeholder="Describe the fix…">${esc(it.note)}</textarea></label>
+     <label class="f">Trade (optional)<input type="text" list="trades" data-f="trade" data-id="${it.id}" value="${esc(it.trade)}" autocomplete="off"></label>
+     ${photoThumbs(it)}
+     <button class="btn block" data-act="photo" data-id="${it.id}">📷 Add photo</button></div>` : ''}
+   ${it.each || it.group === 'custom' || it.added ? `<div class="row" style="margin-top:8px">${it.each ? `<button class="btn sm grow" data-act="again" data-id="${it.id}">+ add another</button>` : ''}
+     ${it.added || it.group === 'custom' ? `<button class="btn sm danger" data-act="delItem" data-id="${it.id}">Remove item</button>` : ''}</div>` : ''}
+  </div>`;
+}
+function sectionHTML(room, group, title) {
+  const items = room.items.filter(i => i.group === group);
+  if (!items.length && group !== 'custom') return '';
+  const key = room.id + group, col = !!ui.collapsed[key];
+  const s = stats(items), shown = ui.hidePassed ? items.filter(i => i.status !== 'pass') : items;
+  const hidden = items.length - shown.length;
+  return `<div class="sec"><button class="tg" data-act="toggleSec" data-k="${key}">${col ? '▸' : '▾'} ${title} <span class="muted">(${s.c}/${s.t})</span></button>
+    ${!col && items.some(i => i.status==='unchecked') ? `<button class="btn sm" data-act="passAll" data-room="${room.id}" data-g="${group}">All pass</button>` : ''}</div>
+    ${col ? '' : shown.map(itemHTML).join('') + (hidden ? `<div class="muted" style="margin:0 0 10px">${hidden} passed item${hidden===1?'':'s'} hidden</div>` : '')}`;
+}
+function roomHTML(room) {
+  const s = stats(room.items), idx = cur.rooms.indexOf(room), t = TEMPLATES.rooms[room.type] || {};
+  const sections = (t.items && t.items.length ? sectionHTML(room, 'room', esc(t.label || 'Room-specific')+' items') : '')
+    + sectionHTML(room, 'base', 'Base items (every room)');
+  return `${topbar('#/i/' + cur.id, room.name, statLine(s))}<div class="wrap">
+  ${t.hint ? `<div class="hint">${esc(t.hint)}</div>` : ''}
+  <label class="row" style="align-items:center;min-height:48px"><input type="checkbox" data-act="hidePassed" ${ui.hidePassed?'checked':''} style="width:26px;height:26px"> Hide passed items</label>
+  ${sections}
+  ${sectionHTML(room, 'custom', 'Custom items')}
+  <button class="btn block" data-act="custom" style="margin-top:6px">+ custom item</button>
+  <div class="row" style="margin-top:16px">
+   <button class="btn grow" data-act="nav" data-to="#/i/${cur.id}/r/${idx>0?cur.rooms[idx-1].id:''}" ${idx===0?'disabled':''}>‹ Prev room</button>
+   <button class="btn grow" data-act="nav" data-to="#/i/${cur.id}/r/${idx<cur.rooms.length-1?cur.rooms[idx+1].id:''}" ${idx===cur.rooms.length-1?'disabled':''}>Next room ›</button></div>
+  <button class="btn pri block" data-act="nav" data-to="#/i/${cur.id}" style="margin-top:8px">Done with room</button></div>`;
+}
+async function render(keepScroll) {
+  const y = window.scrollY;
+  try {
+    if (screen === 'list') app.innerHTML = await listHTML();
+    else if (screen === 'insp') app.innerHTML = inspHTML();
+    else { const r = findRoom(curRoomId); if (!r) return nav('#/i/' + cur.id); app.innerHTML = roomHTML(r); }
+  } catch (e) { storageFail(e); }
+  window.scrollTo(0, keepScroll ? y : 0);
+}
+
+/* ============ routing ============ */
+function nav(h) { if (location.hash === h) route(); else location.hash = h; }
+let routing = Promise.resolve();
+function route() { routing = routing.then(doRoute).catch(storageFail); return routing; }
+async function doRoute() {
+  await flush();
+  const m = location.hash.match(/^#\/i\/([^/]+)(?:\/r\/([^/]+))?/);
+  if (!m) { screen = 'list'; cur = null; return render(); }
+  if (!cur || cur.id !== m[1]) await loadInspection(m[1]);
+  if (!cur) { location.hash = '#/'; return; }
+  if (m[2] && findRoom(m[2])) { screen = 'room'; curRoomId = m[2]; } else screen = 'insp';
+  return render();
+}
+addEventListener('hashchange', route);
+
+/* ============ actions ============ */
+const ACT = {
+  nav: t => { if (/\/r\/$/.test(t.dataset.to)) return; nav(t.dataset.to); },
+  closeModal: () => modal(''),
+  pendShare: async () => { modal(''); const f = window._pend; try { await navigator.share({files:[f], title:f.name}); } catch (e) { if (e.name !== 'AbortError') downloadFile(f); } },
+  pendDl: () => { modal(''); downloadFile(window._pend); },
+  async newInsp() {
+    const last = (await dbGetAll('inspections')).sort((a,b) => b.createdAt - a.createdAt)[0];
+    const i = {id:uid(), site:last?last.site:'', unit:'', date:today(), inspector:last?last.inspector:'', notes:'', rooms:[], createdAt:Date.now(), updatedAt:Date.now()};
+    try { await dbPut('inspections', i); } catch (e) { return storageFail(e); }
+    ui.detailsOpen = null; nav('#/i/' + i.id);
+  },
+  backupAll: () => exportBackup(), backupOne: () => exportBackup(cur.id),
+  importPick: () => $('#imp').click(),
+  toggleDetails: () => { ui.detailsOpen = !(ui.detailsOpen === null ? !cur.unit : ui.detailsOpen); render(true); },
+  addRoom: () => modal(`<h3>Add room</h3><div class="grid">${Object.entries(TEMPLATES.rooms).map(([k,v]) =>
+      `<button class="btn" data-act="makeRoom" data-type="${k}">${esc(v.label)}</button>`).join('')}</div>
+      <button class="btn block" data-act="closeModal" style="margin-top:10px">Close</button>`),
+  makeRoom: async t => {
+    const r = mkRoom(cur, t.dataset.type); cur.rooms.push(r); reorder(cur); await saveNow(); modal(''); render(true); toast('Added ' + r.name);
+  },
+  roomUp: t => moveRoom(t.dataset.id, -1), roomDown: t => moveRoom(t.dataset.id, 1),
+  roomRename: t => { const r = findRoom(t.dataset.id), n = prompt('Room name', r.name); if (n && n.trim()) { r.name = n.trim(); saveNow(); render(true); } },
+  roomDup: t => {
+    const r = findRoom(t.dataset.id), c = JSON.parse(JSON.stringify(r));
+    c.id = uid(); c.name = nextRoomName(cur, r.type);
+    c.items.forEach(i => { i.id = uid(); i.status = 'unchecked'; i.note = ''; i.trade = ''; i.photoIds = []; });
+    cur.rooms.splice(cur.rooms.indexOf(r)+1, 0, c); reorder(cur); saveNow(); render(true); toast('Duplicated as ' + c.name + ' (statuses reset)');
+  },
+  roomDel: async t => {
+    const r = findRoom(t.dataset.id);
+    if (!confirm(`Delete "${r.name}" and its photos?`)) return;
+    await deletePhotos(r.items.flatMap(i => i.photoIds));
+    cur.rooms.splice(cur.rooms.indexOf(r), 1); reorder(cur); await saveNow(); render(true);
+  },
+  pdfDef: () => exportPDF('def'), pdfFull: () => exportPDF('full'), savePhotos: saveAllPhotos,
+  deleteInsp: async () => {
+    if (!confirm('Permanently delete this inspection and all its photos? Export a backup first if unsure.')) return;
+    try { const id = cur.id; dirty = false; await deleteInspectionPhotos(id); await dbDel('inspections', id); cur = null; nav('#/'); } catch (e) { storageFail(e); }
+  },
+  status: t => {
+    const f = findItem(t.dataset.id), v = t.dataset.v;
+    f.item.status = f.item.status === v ? 'unchecked' : v; saveNow(); render(true);
+  },
+  photo: t => { pendingItemId = t.dataset.id; $('#cam').click(); },
+  again: t => {
+    const {room, item} = findItem(t.dataset.id);
+    const base = item.name.replace(/\s*\d+$/, ''), same = room.items.filter(i => i.templateKey === item.templateKey);
+    const c = {...item, id:uid(), name:`${base} ${same.length+1}`, status:'unchecked', note:'', trade:'', photoIds:[], added:true};
+    room.items.splice(room.items.indexOf(same[same.length-1])+1, 0, c); saveNow(); render(true);
+  },
+  custom: () => {
+    const n = prompt('Custom item name (e.g. Fireplace, Built-in shelving)'); if (!n || !n.trim()) return;
+    const room = findRoom(curRoomId);
+    room.items.push({id:uid(), templateKey:'custom', name:n.trim(), check:'', method:'', group:'custom', each:false, status:'unchecked', note:'', trade:'', photoIds:[]});
+    saveNow(); render(true);
+  },
+  delItem: async t => {
+    const {room, item} = findItem(t.dataset.id);
+    if (!confirm(`Remove "${item.name}"${item.photoIds.length ? ' and its photos' : ''}?`)) return;
+    await deletePhotos(item.photoIds); room.items.splice(room.items.indexOf(item), 1); await saveNow(); render(true);
+  },
+  toggleSec: t => { ui.collapsed[t.dataset.k] = !ui.collapsed[t.dataset.k]; render(true); },
+  hidePassed: t => { ui.hidePassed = t.checked; render(true); },
+  passAll: t => {
+    const r = findRoom(t.dataset.room), list = r.items.filter(i => i.group === t.dataset.g && i.status === 'unchecked');
+    if (!confirm(`Mark ${list.length} unchecked item(s) as Pass?`)) return;
+    list.forEach(i => i.status = 'pass'); saveNow(); render(true);
+  },
+  viewPhoto: t => openViewer(t.dataset.p),
+};
+function moveRoom(id, d) {
+  const i = cur.rooms.findIndex(r => r.id === id), j = i + d; if (j < 0 || j >= cur.rooms.length) return;
+  [cur.rooms[i], cur.rooms[j]] = [cur.rooms[j], cur.rooms[i]]; reorder(cur); saveNow(); render(true);
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-act]');
+  if (!t || t.disabled) return;
+  if (t.dataset.act === 'closeModal' && t.tagName !== 'BUTTON' && e.target.closest('[data-stop]')) return;
+  if (t.tagName === 'INPUT') return;
+  const now = Date.now();                       // duplicate-tap guard
+  const key = t.dataset.act + (t.dataset.id || t.dataset.type || t.dataset.to || t.dataset.k || '') + (t.dataset.v || '');
+  if (t.type !== 'checkbox' && key === window._lastKey && now - window._lastAt < 500) return;
+  window._lastKey = key; window._lastAt = now;
+  const fn = ACT[t.dataset.act]; if (fn) Promise.resolve(fn(t)).catch(storageFail);
+});
+document.addEventListener('change', e => { const t = e.target; if (t.matches('input[data-act="hidePassed"]')) ACT.hidePassed(t); });
+document.addEventListener('input', e => {
+  const t = e.target, f = t.dataset && t.dataset.f; if (!f || !cur) return;
+  if (t.dataset.scope === 'insp') cur[f] = t.value; else { const x = findItem(t.dataset.id); if (!x) return; x.item[f] = t.value; }
+  queueSave();
+});
+
+/* photo viewer */
+function openViewer(id) {
+  const p = photoCache.get(id); if (!p) return;
+  const v = document.createElement('div'); v.className = 'viewer'; v.id = 'viewer';
+  v.innerHTML = `<div class="img"><img src="${p.url}" alt="Photo"></div><div class="vb">
+    <button class="btn" data-v="save">Save to Photos</button><button class="btn" data-v="del" style="color:#ff8a8a">Delete</button><button class="btn" data-v="close">Close</button></div>`;
+  v.onclick = async e => {
+    const a = e.target.dataset.v; if (!a) return;
+    if (a === 'close') v.remove();
+    else if (a === 'save') sharePhoto(id);
+    else if (a === 'del' && confirm('Delete this photo?')) {
+      const f = findItem(p.itemId); if (f) f.item.photoIds = f.item.photoIds.filter(x => x !== id);
+      await deletePhotos([id]); await saveNow(); v.remove(); render(true);
+    }
+  };
+  document.body.appendChild(v);
+}
+
+/* ============ install icon + manifest (inline) ============ */
+function setupInstall() {
+  try {
+    const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
+    g.fillStyle = '#0b4fd6'; g.fillRect(0,0,512,512); g.strokeStyle = '#fff'; g.lineWidth = 56; g.lineCap = g.lineJoin = 'round';
+    g.beginPath(); g.moveTo(130,270); g.lineTo(225,365); g.lineTo(390,160); g.stroke();
+    const png = c.toDataURL('image/png');
+    $('#touchIcon').href = png;
+    const man = {name:'QC Walkthrough', short_name:'QC Walk', display:'standalone', background_color:'#0b4fd6', theme_color:'#0b4fd6',
+      start_url: location.href.split('#')[0], icons:[{src:png, sizes:'512x512', type:'image/png', purpose:'any'}]};
+    $('#manifestLink').href = URL.createObjectURL(new Blob([JSON.stringify(man)], {type:'application/manifest+json'}));
+  } catch (_) {}
+}
+
+/* ============ boot ============ */
+(async function boot() {
+  setupInstall();
+  try { db = await openDB(); } catch (e) {
+    app.innerHTML = `<div class="wrap"><div class="card"><h3>Storage unavailable</h3><p>${esc(e.message)}</p><p>This app needs browser storage (IndexedDB). Leave private browsing and reload.</p></div></div>`;
+    return;
+  }
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (_) {}
+  route();
+})();
+</script>
+</body>
+</html>
