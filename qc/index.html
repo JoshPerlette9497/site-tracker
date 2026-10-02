@@ -37,7 +37,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 button,label,.card.tap,[data-act]{touch-action:manipulation;-webkit-user-select:none;user-select:none}
 .btn:active,.sb button:active,.sec .tg:active,.thumbs button:active{filter:brightness(.8);transform:scale(.96)}
 .card.tap:active{filter:brightness(.92)}
-.btn,.sb button{transition:transform .06s}
+.pressed{transform:scale(.93)!important;filter:brightness(.72)!important;box-shadow:inset 0 0 0 4px rgba(0,0,0,.35)!important}
+.btn,.sb button,.card.tap,.sec .tg{transition:transform .05s}
 .btn.pri{background:var(--pri);border-color:var(--pri);color:var(--priFg)}
 .btn.danger{color:var(--def);border-color:var(--def)}
 .btn.block{display:flex;width:100%}
@@ -784,6 +785,17 @@ function moveRoom(id, d) {
   const i = cur.rooms.findIndex(r => r.id === id), j = i + d; if (j < 0 || j >= cur.rooms.length) return;
   [cur.rooms[i], cur.rooms[j]] = [cur.rooms[j], cur.rooms[i]]; reorder(cur); saveNow(); render(true);
 }
+/* pressed feedback: iOS ignores :active without a touch listener, so also mark elements by pointer events */
+document.addEventListener('touchstart', () => {}, {passive:true});
+let pressedEl = null;
+const PRESSABLE = 'button, [data-act], .card.tap';
+function unpress(delay) { const el = pressedEl; pressedEl = null; if (el) setTimeout(() => el.classList.remove('pressed'), delay); }
+document.addEventListener('pointerdown', e => {
+  unpress(0);
+  const t = e.target.closest(PRESSABLE);
+  if (t && !t.disabled && t.tagName !== 'INPUT' && !(t.dataset.act === 'closeModal' && t.tagName !== 'BUTTON')) { t.classList.add('pressed'); pressedEl = t; }
+});
+['pointerup', 'pointercancel'].forEach(n => document.addEventListener(n, () => unpress(140)));
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-act]');
   if (!t || t.disabled) return;
@@ -793,7 +805,10 @@ document.addEventListener('click', e => {
   const key = t.dataset.act + (t.dataset.id || t.dataset.type || t.dataset.to || t.dataset.k || '') + (t.dataset.v || '') + (t.dataset.d || '');
   if (t.type !== 'checkbox' && key === window._lastKey && now - window._lastAt < 500) return;
   window._lastKey = key; window._lastAt = now;
-  const fn = ACT[t.dataset.act]; if (fn) Promise.resolve(fn(t)).catch(storageFail);
+  const fn = ACT[t.dataset.act]; if (!fn) return;
+  const run = () => Promise.resolve(fn(t)).catch(storageFail);
+  if (['photo', 'importPick', 'viewPhoto'].includes(t.dataset.act)) run();   // need the tap gesture right now
+  else setTimeout(run, 90);
 });
 document.addEventListener('change', e => { const t = e.target; if (t.matches('input[data-act="hidePassed"]')) ACT.hidePassed(t); });
 document.addEventListener('input', e => {
