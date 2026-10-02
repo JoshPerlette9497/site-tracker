@@ -34,7 +34,10 @@ button,input,select,textarea{font:inherit;color:inherit}
 .wrap{padding:12px calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left))}
 .btn{min-height:48px;min-width:48px;padding:8px 14px;border-radius:10px;border:2px solid var(--bd);background:var(--card);
   font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-align:center}
-.btn:active{filter:brightness(.88)}
+button,label,.card.tap,[data-act]{touch-action:manipulation;-webkit-user-select:none;user-select:none}
+.btn:active,.sb button:active,.sec .tg:active,.thumbs button:active{filter:brightness(.8);transform:scale(.96)}
+.card.tap:active{filter:brightness(.92)}
+.btn,.sb button{transition:transform .06s}
 .btn.pri{background:var(--pri);border-color:var(--pri);color:var(--priFg)}
 .btn.danger{color:var(--def);border-color:var(--def)}
 .btn.block{display:flex;width:100%}
@@ -758,6 +761,10 @@ document.addEventListener('click', e => {
   if (!t || t.disabled) return;
   if (t.dataset.act === 'closeModal' && t.tagName !== 'BUTTON' && e.target.closest('[data-stop]')) return;
   if (t.tagName === 'INPUT') return;
+  const now = Date.now();                       // duplicate-tap guard
+  const key = t.dataset.act + (t.dataset.id || t.dataset.type || t.dataset.v || '');
+  if (t.type !== 'checkbox' && key === window._lastKey && now - window._lastAt < 500) return;
+  window._lastKey = key; window._lastAt = now;
   const fn = ACT[t.dataset.act]; if (fn) Promise.resolve(fn(t)).catch(storageFail);
 });
 document.addEventListener('change', e => { const t = e.target; if (t.matches('input[data-act="hidePassed"]')) ACT.hidePassed(t); });
