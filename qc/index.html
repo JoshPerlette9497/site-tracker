@@ -280,7 +280,7 @@ function mkItem(key, [n, c, m], group) {
   const each = /\(each/i.test(n);
   const name = n.replace(/\s*\(each[^)]*\)/i, '');
   return { id:uid(), templateKey:key, name: each ? name+' 1' : name, check:c||'', method:m||'', group, each,
-           status:'unchecked', note:'', trade:'', photoIds:[] };
+           status:'unchecked', defs:[] };
 }
 function nextRoomName(insp, type) {
   const prefix = TEMPLATES.rooms[type].prefix;
@@ -297,9 +297,19 @@ function mkRoom(insp, type) {
 const reorder = insp => insp.rooms.forEach((r,i) => r.order = i);
 const findRoom = id => cur && cur.rooms.find(r => r.id === id);
 function findItem(id) { for (const r of cur.rooms) { const i = r.items.find(x => x.id === id); if (i) return {room:r, item:i}; } return null; }
+const newDef = () => ({id:uid(), note:'', trade:'', photoIds:[]});
+const itemPhotoIds = it => it.defs.flatMap(d => d.photoIds);
+function migrate(insp) {   // older data: one deficiency per item stored on the item itself
+  insp.rooms.forEach(r => r.items.forEach(it => {
+    if (it.defs) return;
+    it.defs = (it.status === 'def' || it.note || it.trade || (it.photoIds||[]).length) ? [{id:uid(), note:it.note||'', trade:it.trade||'', photoIds:it.photoIds||[]}] : [];
+    delete it.note; delete it.trade; delete it.photoIds;
+  }));
+  return insp;
+}
 function stats(items) {
   const s = {t:items.length, c:0, d:0, p:0, n:0};
-  for (const i of items) { if (i.status==='pass') {s.p++; s.c++;} else if (i.status==='def') {s.d++; s.c++;} else if (i.status==='na') {s.n++; s.c++;} }
+  for (const i of items) { if (i.status==='pass') {s.p++; s.c++;} else if (i.status==='def') {s.d += Math.max(1, i.defs.length); s.c++;} else if (i.status==='na') {s.n++; s.c++;} }
   return s;
 }
 const inspStats = i => stats(i.rooms.flatMap(r => r.items));
@@ -308,7 +318,7 @@ const pct = s => s.t ? Math.round(s.c/s.t*100) : 0;
 
 async function loadInspection(id) {
   const all = await dbGetAll('inspections');
-  cur = all.find(i => i.id === id) || null;
+  cur = all.find(i => i.id === id) || null; if (cur) migrate(cur);
   photoCache.forEach(p => URL.revokeObjectURL(p.url)); photoCache.clear();
   if (!cur) return;
   for (const p of await photosOf(id)) photoCache.set(p.id, {...p, url:URL.createObjectURL(p.blob)});
@@ -334,17 +344,18 @@ async function resizeImage(blob, max=1600, q=0.75) {
   if (!out) throw new Error('Could not encode photo');
   return {blob: out, w:c.width, h:c.height};
 }
-let pendingItemId = null;
+let pendingItemId = null, pendingDefId = null;
 $('#cam').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = '';
   if (!file || !pendingItemId) return;
   const found = findItem(pendingItemId); if (!found) return;
+  const def = found.item.defs.find(d => d.id === pendingDefId); if (!def) return;
   busy('Saving photo…');
   try {
     const {blob} = await resizeImage(file);
     const p = {id:uid(), inspectionId:cur.id, itemId:found.item.id, blob, createdAt:Date.now()};
     await dbPut('photos', p);
-    found.item.photoIds.push(p.id);
+    def.photoIds.push(p.id);
     photoCache.set(p.id, {...p, url:URL.createObjectURL(blob)});
     await saveNow();
     render(true);
@@ -354,8 +365,10 @@ $('#cam').addEventListener('change', async e => {
 });
 function photoFile(id) {
   const p = photoCache.get(id), f = findItem(p.itemId);
-  const n = f ? f.item.photoIds.indexOf(id)+1 : 1;
-  const name = [slug(cur.unit)||'Unit', f&&slug(f.room.name), f&&slug(f.item.name), n].filter(Boolean).join('_') + '.jpg';
+  const di = f ? f.item.defs.findIndex(d => d.photoIds.includes(id)) : -1;
+  const n = di >= 0 ? f.item.defs[di].photoIds.indexOf(id)+1 : 1;
+  const tag = f && f.item.defs.length > 1 ? 'Def' + (di+1) : '';
+  const name = [slug(cur.unit)||'Unit', f&&slug(f.room.name), f&&slug(f.item.name), tag, n].filter(Boolean).join('_') + '.jpg';
   return new File([p.blob], name, {type:'image/jpeg'});
 }
 function downloadFile(file) {
@@ -370,7 +383,7 @@ async function sharePhoto(id) {
   downloadFile(f);
 }
 async function saveAllPhotos() {
-  const ids = []; cur.rooms.forEach(r => r.items.forEach(i => i.photoIds.forEach(id => photoCache.has(id) && ids.push(id))));
+  const ids = []; cur.rooms.forEach(r => r.items.forEach(i => itemPhotoIds(i).forEach(id => photoCache.has(id) && ids.push(id))));
   if (!ids.length) return toast('No photos in this inspection yet');
   const files = ids.map(photoFile);
   try { if (navigator.canShare && navigator.canShare({files})) { await navigator.share({files}); return; } }
@@ -458,8 +471,8 @@ async function buildPDF(kind) {
   }
   y += 5;
 
-  async function photosBlock(item) {
-    const ids = item.photoIds.filter(id => photoCache.has(id));
+  async function photosBlock(d) {
+    const ids = d.photoIds.filter(id => photoCache.has(id));
     const gap = 3, iw = (CW - 2*gap) / 3, maxH = 62;
     for (let i = 0; i < ids.length; i += 3) {
       const imgs = []; for (const id of ids.slice(i, i+3)) imgs.push(await pdfImg(id));
@@ -471,9 +484,14 @@ async function buildPDF(kind) {
     }
   }
   async function defBlock(item, indent) {
-    para('Fix: ' + (item.note || '(no description)'), M+indent, CW-indent, 10, false);
-    if (item.trade) para('Trade: ' + item.trade, M+indent, CW-indent, 10, true, [40,40,40]);
-    y += 1; await photosBlock(item);
+    const list = item.defs.length ? item.defs : [newDef()];
+    for (let k = 0; k < list.length; k++) {
+      const d = list[k], multi = list.length > 1;
+      need(14);
+      para((multi ? `${k+1}) ` : '') + 'Fix: ' + (d.note || '(no description)'), M+indent, CW-indent, 10, false);
+      if (d.trade) para('Trade: ' + d.trade, M+indent, CW-indent, 10, true, [40,40,40]);
+      y += 1; await photosBlock(d); if (multi) y += 1;
+    }
   }
   function roomHead(r) {
     need(20); y += 2;
@@ -555,7 +573,7 @@ $('#imp').addEventListener('change', async e => {
       const blob = await (await fetch(p.data)).blob();
       await dbPut('photos', {id:p.id, inspectionId:p.inspectionId, itemId:p.itemId, createdAt:p.createdAt, blob});
     }
-    for (const i of data.inspections || []) await dbPut('inspections', i);
+    for (const i of data.inspections || []) await dbPut('inspections', migrate(i));
     toast(`Imported ${data.inspections.length} inspection(s), ${(data.photos||[]).length} photo(s)`);
     cur = null; await route();
   } catch (err) { console.error(err); toast('Import failed: ' + err.message, {err:true}); }
@@ -568,7 +586,7 @@ const topbar = (back, title, sub) => `<div class="bar">${back ? `<button class="
 const progBar = s => `<div class="prog"><i style="width:${pct(s)}%"></i></div>`;
 
 async function listHTML() {
-  const all = (await dbGetAll('inspections')).sort((a,b) => b.createdAt - a.createdAt);
+  const all = (await dbGetAll('inspections')).map(migrate).sort((a,b) => b.createdAt - a.createdAt);
   return `${topbar('', 'QC Inspections')}<div class="wrap">
   <button class="btn pri block" data-act="newInsp" style="margin-bottom:12px">+ New inspection</button>
   ${all.length ? all.map(i => { const s = inspStats(i); return `<div class="card tap" data-act="nav" data-to="#/i/${i.id}">
@@ -613,8 +631,8 @@ function inspHTML() {
   <h2>Danger zone</h2><button class="btn danger block" data-act="deleteInsp">Delete this inspection</button></div>`;
 }
 
-function photoThumbs(it) {
-  return `<div class="thumbs">${it.photoIds.filter(id => photoCache.has(id)).map(id =>
+function photoThumbs(d) {
+  return `<div class="thumbs">${d.photoIds.filter(id => photoCache.has(id)).map(id =>
     `<button data-act="viewPhoto" data-p="${id}" aria-label="View photo"><img src="${photoCache.get(id).url}" alt="Photo"></button>`).join('')}</div>`;
 }
 function itemHTML(it) {
@@ -622,11 +640,13 @@ function itemHTML(it) {
   return `<div class="item ${it.status}" id="it-${it.id}"><div class="nm">${esc(it.name)}</div>
    ${it.check ? `<div class="ck">${esc(it.check)}</div>` : ''}${it.method ? `<div class="ck"><i>Method: ${esc(it.method)}</i></div>` : ''}
    <div class="sb">${b('pass','p','Pass')}${b('def','d','Deficiency')}${b('na','n','N/A')}</div>
-   ${it.status === 'def' ? `<div class="defp">
-     <label class="f">What needs to be fixed<textarea data-f="note" data-id="${it.id}" placeholder="Describe the fix…">${esc(it.note)}</textarea></label>
-     <label class="f">Trade (optional)<input type="text" list="trades" data-f="trade" data-id="${it.id}" value="${esc(it.trade)}" autocomplete="off"></label>
-     ${photoThumbs(it)}
-     <button class="btn block" data-act="photo" data-id="${it.id}">📷 Add photo</button></div>` : ''}
+   ${it.status === 'def' ? it.defs.map((d,k) => `<div class="defp">
+     ${it.defs.length > 1 ? `<div class="row" style="align-items:center;margin-bottom:6px"><b class="grow">Deficiency ${k+1}</b><button class="btn sm danger" data-act="delDef" data-id="${it.id}" data-d="${d.id}">Remove</button></div>` : ''}
+     <label class="f">What needs to be fixed<textarea data-f="note" data-id="${it.id}" data-d="${d.id}" placeholder="Describe the fix…">${esc(d.note)}</textarea></label>
+     <label class="f">Trade (optional)<input type="text" list="trades" data-f="trade" data-id="${it.id}" data-d="${d.id}" value="${esc(d.trade)}" autocomplete="off"></label>
+     ${photoThumbs(d)}
+     <button class="btn block" data-act="photo" data-id="${it.id}" data-d="${d.id}">📷 Add photo</button></div>`).join('')
+     + `<button class="btn block" data-act="addDef" data-id="${it.id}" style="margin-top:8px">+ add another deficiency (different fix or trade)</button>` : ''}
    ${it.each || it.group === 'custom' || it.added ? `<div class="row" style="margin-top:8px">${it.each ? `<button class="btn sm grow" data-act="again" data-id="${it.id}">+ add another</button>` : ''}
      ${it.added || it.group === 'custom' ? `<button class="btn sm danger" data-act="delItem" data-id="${it.id}">Remove item</button>` : ''}</div>` : ''}
   </div>`;
@@ -707,13 +727,13 @@ const ACT = {
   roomDup: t => {
     const r = findRoom(t.dataset.id), c = JSON.parse(JSON.stringify(r));
     c.id = uid(); c.name = nextRoomName(cur, r.type);
-    c.items.forEach(i => { i.id = uid(); i.status = 'unchecked'; i.note = ''; i.trade = ''; i.photoIds = []; });
+    c.items.forEach(i => { i.id = uid(); i.status = 'unchecked'; i.defs = []; });
     cur.rooms.splice(cur.rooms.indexOf(r)+1, 0, c); reorder(cur); saveNow(); render(true); toast('Duplicated as ' + c.name + ' (statuses reset)');
   },
   roomDel: async t => {
     const r = findRoom(t.dataset.id);
     if (!confirm(`Delete "${r.name}" and its photos?`)) return;
-    await deletePhotos(r.items.flatMap(i => i.photoIds));
+    await deletePhotos(r.items.flatMap(itemPhotoIds));
     cur.rooms.splice(cur.rooms.indexOf(r), 1); reorder(cur); await saveNow(); render(true);
   },
   pdfDef: () => exportPDF('def'), pdfFull: () => exportPDF('full'), savePhotos: saveAllPhotos,
@@ -723,25 +743,33 @@ const ACT = {
   },
   status: t => {
     const f = findItem(t.dataset.id), v = t.dataset.v;
-    f.item.status = f.item.status === v ? 'unchecked' : v; saveNow(); render(true);
+    f.item.status = f.item.status === v ? 'unchecked' : v;
+    if (f.item.status === 'def' && !f.item.defs.length) f.item.defs.push(newDef());
+    saveNow(); render(true);
   },
-  photo: t => { pendingItemId = t.dataset.id; $('#cam').click(); },
+  photo: t => { pendingItemId = t.dataset.id; pendingDefId = t.dataset.d; $('#cam').click(); },
+  addDef: t => { findItem(t.dataset.id).item.defs.push(newDef()); saveNow(); render(true); },
+  delDef: async t => {
+    const it = findItem(t.dataset.id).item, d = it.defs.find(x => x.id === t.dataset.d);
+    if (!confirm('Remove this deficiency' + (d.photoIds.length ? ' and its photos' : '') + '?')) return;
+    await deletePhotos(d.photoIds); it.defs.splice(it.defs.indexOf(d), 1); await saveNow(); render(true);
+  },
   again: t => {
     const {room, item} = findItem(t.dataset.id);
     const base = item.name.replace(/\s*\d+$/, ''), same = room.items.filter(i => i.templateKey === item.templateKey);
-    const c = {...item, id:uid(), name:`${base} ${same.length+1}`, status:'unchecked', note:'', trade:'', photoIds:[], added:true};
+    const c = {...item, id:uid(), name:`${base} ${same.length+1}`, status:'unchecked', defs:[], added:true};
     room.items.splice(room.items.indexOf(same[same.length-1])+1, 0, c); saveNow(); render(true);
   },
   custom: () => {
     const n = prompt('Custom item name (e.g. Fireplace, Built-in shelving)'); if (!n || !n.trim()) return;
     const room = findRoom(curRoomId);
-    room.items.push({id:uid(), templateKey:'custom', name:n.trim(), check:'', method:'', group:'custom', each:false, status:'unchecked', note:'', trade:'', photoIds:[]});
+    room.items.push({id:uid(), templateKey:'custom', name:n.trim(), check:'', method:'', group:'custom', each:false, status:'unchecked', defs:[]});
     saveNow(); render(true);
   },
   delItem: async t => {
     const {room, item} = findItem(t.dataset.id);
-    if (!confirm(`Remove "${item.name}"${item.photoIds.length ? ' and its photos' : ''}?`)) return;
-    await deletePhotos(item.photoIds); room.items.splice(room.items.indexOf(item), 1); await saveNow(); render(true);
+    if (!confirm(`Remove "${item.name}"${itemPhotoIds(item).length ? ' and its photos' : ''}?`)) return;
+    await deletePhotos(itemPhotoIds(item)); room.items.splice(room.items.indexOf(item), 1); await saveNow(); render(true);
   },
   toggleSec: t => { ui.collapsed[t.dataset.k] = !ui.collapsed[t.dataset.k]; render(true); },
   hidePassed: t => { ui.hidePassed = t.checked; render(true); },
@@ -762,7 +790,7 @@ document.addEventListener('click', e => {
   if (t.dataset.act === 'closeModal' && t.tagName !== 'BUTTON' && e.target.closest('[data-stop]')) return;
   if (t.tagName === 'INPUT') return;
   const now = Date.now();                       // duplicate-tap guard
-  const key = t.dataset.act + (t.dataset.id || t.dataset.type || t.dataset.to || t.dataset.k || '') + (t.dataset.v || '');
+  const key = t.dataset.act + (t.dataset.id || t.dataset.type || t.dataset.to || t.dataset.k || '') + (t.dataset.v || '') + (t.dataset.d || '');
   if (t.type !== 'checkbox' && key === window._lastKey && now - window._lastAt < 500) return;
   window._lastKey = key; window._lastAt = now;
   const fn = ACT[t.dataset.act]; if (fn) Promise.resolve(fn(t)).catch(storageFail);
@@ -770,7 +798,7 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => { const t = e.target; if (t.matches('input[data-act="hidePassed"]')) ACT.hidePassed(t); });
 document.addEventListener('input', e => {
   const t = e.target, f = t.dataset && t.dataset.f; if (!f || !cur) return;
-  if (t.dataset.scope === 'insp') cur[f] = t.value; else { const x = findItem(t.dataset.id); if (!x) return; x.item[f] = t.value; }
+  if (t.dataset.scope === 'insp') cur[f] = t.value; else { const x = findItem(t.dataset.id); if (!x) return; const d = x.item.defs.find(d => d.id === t.dataset.d); if (d) d[f] = t.value; }
   queueSave();
 });
 
@@ -785,7 +813,7 @@ function openViewer(id) {
     if (a === 'close') v.remove();
     else if (a === 'save') sharePhoto(id);
     else if (a === 'del' && confirm('Delete this photo?')) {
-      const f = findItem(p.itemId); if (f) f.item.photoIds = f.item.photoIds.filter(x => x !== id);
+      const f = findItem(p.itemId); if (f) f.item.defs.forEach(d => d.photoIds = d.photoIds.filter(x => x !== id));
       await deletePhotos([id]); await saveNow(); v.remove(); render(true);
     }
   };
