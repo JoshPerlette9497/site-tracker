@@ -762,7 +762,7 @@ document.addEventListener('click', e => {
   if (t.dataset.act === 'closeModal' && t.tagName !== 'BUTTON' && e.target.closest('[data-stop]')) return;
   if (t.tagName === 'INPUT') return;
   const now = Date.now();                       // duplicate-tap guard
-  const key = t.dataset.act + (t.dataset.id || t.dataset.type || t.dataset.v || '');
+  const key = t.dataset.act + (t.dataset.id || t.dataset.type || t.dataset.to || t.dataset.k || '') + (t.dataset.v || '');
   if (t.type !== 'checkbox' && key === window._lastKey && now - window._lastAt < 500) return;
   window._lastKey = key; window._lastAt = now;
   const fn = ACT[t.dataset.act]; if (fn) Promise.resolve(fn(t)).catch(storageFail);
