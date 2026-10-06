@@ -900,20 +900,27 @@ function openUnitModal(){
 function renderPhaseGroupRow(row, highlight){
   const {gi,g,due,done,total,st} = row;
   const isOpen = expandedGroupIds.has(gi.id);
+  const qcInProgress = qcInspectionInProgress(gi.unitId, g.id);
   let html = `<div class="card ${st}${highlight?' week-urgent':''}">
     <div class="row pcg-toggle" data-giid="${gi.id}" style="cursor:pointer;">
       <div style="min-width:0; flex:1;">
         <div class="item-name">${escapeHtml(g.name)}</div>
-        <div class="item-meta">${due?'due '+fmtDate(due):'no schedule match'} · ${done}/${total} done</div>
+        <div class="item-meta">${due?'due '+fmtDate(due):'no schedule match'} · ${done}/${total} done · v${g.version||1}</div>
       </div>
       <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
         ${highlight?'<span class="stamp week-urgent">This Week</span>':''}
+        ${qcInProgress?'<span class="stamp today">QC In Progress</span>':''}
         <span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':st==='done'?'Done':'Open'}</span>
         <span style="font-size:16px;">${isOpen?'▾':'▸'}</span>
       </div>
     </div>`;
   if(isOpen){
-    html += `<div style="margin-top:10px;">`;
+    html += `<div class="row" style="margin-top:10px; gap:6px;">
+      <button class="btn small qc-start-btn" data-unitid="${gi.unitId}" data-groupid="${g.id}" style="flex:1;">${qcInProgress?'Continue QC Check':'Start QC Check'}</button>
+      <button class="btn small ghost qc-history-btn" data-groupid="${g.id}" data-unitid="${gi.unitId}">QC History</button>
+    </div>`;
+    html += `<div class="item-meta" style="margin-top:10px;">Ongoing completion tracking</div>`;
+    html += `<div style="margin-top:4px;">`;
     let lastSub = undefined;
     for(const it of g.items){
       if(it.subgroup !== lastSub){
@@ -942,6 +949,358 @@ function renderPhaseGroupRow(row, highlight){
   }
   html += `</div>`;
   return html;
+}
+
+/* ---------- QC Phase Check + Controlled Checklist Evolution ----------
+   Three screens, each a full showModal() replacement of whatever came
+   before (this app only ever has one modal open at a time), chained via
+   the "Back"/"Finish" buttons rather than nesting:
+     openQcCheckModal    - run the frozen checklist (Pass/Issue/NA) + log
+                            Discovered Items while inspecting
+     openQcReviewModal   - only reached if there's at least one discovery;
+                            forces a NEW/MERGED/REJECTED decision on each
+     openQcHistoryModal / openQcInspectionDetailModal - read-only history:
+                            checklist version log + past inspections */
+
+function qcItemRowHtml(insp, item){
+  const result = insp.itemResults[item.id] || '';
+  const note = insp.itemNotes[item.id] || '';
+  return `<div class="card" style="margin-bottom:6px;">
+    <div class="item-name" style="font-size:13px;">${escapeHtml(item.text)}</div>
+    <div class="row" style="margin-top:8px; gap:6px;">
+      <button class="btn small qc-result-btn ${result==='pass'?'done-btn':'ghost'}" data-result="pass" data-itemid="${item.id}" style="flex:1;">Pass</button>
+      <button class="btn small qc-result-btn ${result==='issue'?'danger':'ghost'}" data-result="issue" data-itemid="${item.id}" style="flex:1;">Issue</button>
+      <button class="btn small qc-result-btn ${result==='na'?'':'ghost'}" data-result="na" data-itemid="${item.id}" style="flex:1; ${result==='na'?'background:var(--ink-dim); color:#fff;':''}">N/A</button>
+    </div>
+    ${result==='issue' ? `<input type="text" class="qc-item-note" data-itemid="${item.id}" placeholder="Note (optional)…" value="${escapeHtml(note)}" style="margin-top:8px;">` : ''}
+  </div>`;
+}
+
+function qcDiscoveryRowHtml(d){
+  let html = `<div class="card">
+    <div class="item-name" style="font-size:13px;">${escapeHtml(d.description)}</div>
+    ${d.severity?`<div class="item-meta" style="margin-top:2px;">Severity: ${escapeHtml(d.severity)}</div>`:''}
+    ${d.notes?`<div style="font-size:13px; margin-top:4px;">${escapeHtml(d.notes)}</div>`:''}`;
+  if(d.photos.length){
+    html += `<div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;">`;
+    for(const p of d.photos){
+      html += `<div class="hazard-photo"><img src="${escapeHtml(p.photoUrl)}" alt="Photo"><button class="hazard-photo-remove qc-disc-photo-remove" data-discid="${d.id}" data-photoid="${p.id}">×</button></div>`;
+    }
+    html += `</div>`;
+  }
+  html += `<input type="file" accept="image/*" capture="environment" multiple class="qc-disc-photo-input" data-discid="${d.id}" style="display:none;">
+    <div class="row" style="margin-top:8px; gap:6px;">
+      <button class="btn small ghost qc-disc-photo-btn" data-discid="${d.id}" style="flex:1;">+ Photo${d.photos.length?' ('+d.photos.length+')':''}</button>
+      <button class="btn small danger qc-disc-remove" data-discid="${d.id}" style="flex:1;">Remove</button>
+    </div>
+  </div>`;
+  return html;
+}
+
+function qcDiscoveryFormHtml(){
+  return `<div class="card">
+    <label>What did you notice?</label>
+    <textarea id="qcDiscDesc" style="min-height:60px;" placeholder="e.g. Garage duct penetration missing firestop"></textarea>
+    <label style="margin-top:8px; display:block;">Severity (optional)</label>
+    <select id="qcDiscSeverity">
+      <option value="">— none —</option>
+      <option value="Low">Low</option>
+      <option value="Medium">Medium</option>
+      <option value="High">High</option>
+    </select>
+    <label style="margin-top:8px; display:block;">Notes (optional)</label>
+    <textarea id="qcDiscNotes" style="min-height:50px;" placeholder="Details…"></textarea>
+    <div class="row" style="margin-top:10px; gap:6px;">
+      <button class="btn small ghost" id="qcDiscCancel" style="flex:1;">Cancel</button>
+      <button class="btn small" id="qcDiscSave" style="flex:1;">Add Discovery</button>
+    </div>
+  </div>`;
+}
+
+function openQcCheckModal(inspectionId){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp){ showToast('Could not find that QC check — try reloading.'); return; }
+  const u = state.units.find(x=>x.id===insp.unitId);
+  let html = `<h2>QC Check</h2>
+    <div class="helptext" style="margin-bottom:12px;">${escapeHtml(u?u.name:'')} · ${escapeHtml(insp.phaseName)} · checklist v${insp.checklistVersionNumber} · started ${fmtDate(insp.startedAt.slice(0,10))}</div>`;
+  let lastSub;
+  for(const it of insp.checklistSnapshot){
+    if(it.subgroup !== lastSub){
+      html += `<div class="item-meta" style="font-weight:700; margin-top:10px;">${escapeHtml(it.subgroup||'')}</div>`;
+      lastSub = it.subgroup;
+    }
+    html += qcItemRowHtml(insp, it);
+  }
+  html += `<div class="section-title">Discovered Items<span class="pill">${insp.discoveries.length}</span></div>
+    <div class="helptext" style="margin-bottom:8px;">Noticed something not already covered by the checklist above? Record it here — it won't change the checklist on its own; you'll decide that when you finish.</div>`;
+  for(const d of insp.discoveries){ html += qcDiscoveryRowHtml(d); }
+  if(qcDiscoveryFormOpenFor===insp.id){
+    html += qcDiscoveryFormHtml();
+  } else {
+    html += `<button class="btn small ghost" id="qcAddDiscBtn" style="width:100%;">+ Add Discovered Item</button>`;
+  }
+  html += `<div class="divider"></div>
+    <button class="btn" id="qcFinishBtn" style="width:100%;">Finish QC Check</button>
+    <button class="btn small ghost" id="qcBackBtn" style="width:100%; margin-top:8px;">Save &amp; Back to Unit</button>`;
+  showModal(html);
+  wireQcCheckModal(inspectionId);
+}
+
+function wireQcCheckModal(inspectionId){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return;
+  document.getElementById('qcBackBtn').onclick = ()=>{ qcDiscoveryFormOpenFor = null; openUnitDetail(insp.unitId); };
+  document.querySelectorAll('.qc-result-btn').forEach(btn=>btn.onclick=async()=>{
+    await setQcItemResult(inspectionId, btn.dataset.itemid, btn.dataset.result);
+    openQcCheckModal(inspectionId);
+  });
+  document.querySelectorAll('.qc-item-note').forEach(inp=>{
+    inp.onchange = async(e)=>{ await setQcItemNote(inspectionId, e.target.dataset.itemid, e.target.value.trim()); };
+  });
+  const addBtn = document.getElementById('qcAddDiscBtn');
+  if(addBtn) addBtn.onclick = ()=>{ qcDiscoveryFormOpenFor = inspectionId; openQcCheckModal(inspectionId); };
+  const cancelBtn = document.getElementById('qcDiscCancel');
+  if(cancelBtn) cancelBtn.onclick = ()=>{ qcDiscoveryFormOpenFor = null; openQcCheckModal(inspectionId); };
+  const saveBtn = document.getElementById('qcDiscSave');
+  if(saveBtn) saveBtn.onclick = async()=>{
+    const desc = document.getElementById('qcDiscDesc').value.trim();
+    if(!desc){ showToast('Describe what you noticed first.'); return; }
+    await addQcDiscovery(inspectionId, {
+      description: desc,
+      severity: document.getElementById('qcDiscSeverity').value,
+      notes: document.getElementById('qcDiscNotes').value.trim()
+    });
+    qcDiscoveryFormOpenFor = null;
+    openQcCheckModal(inspectionId);
+  };
+  document.querySelectorAll('.qc-disc-remove').forEach(btn=>btn.onclick=()=>{
+    showConfirm('Remove this discovery? It was only recorded this session and has not been reviewed yet.', async()=>{
+      await removeQcDiscovery(inspectionId, btn.dataset.discid);
+      openQcCheckModal(inspectionId);
+    });
+  });
+  document.querySelectorAll('.qc-disc-photo-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      document.querySelector(`.qc-disc-photo-input[data-discid="${btn.dataset.discid}"]`).click();
+    };
+  });
+  document.querySelectorAll('.qc-disc-photo-input').forEach(input=>{
+    input.onchange = async(e)=>{
+      const discId = e.target.dataset.discid;
+      const files = [...e.target.files];
+      if(files.length===0) return;
+      const btn = document.querySelector(`.qc-disc-photo-btn[data-discid="${discId}"]`);
+      const originalLabel = btn ? btn.textContent : '';
+      if(btn) btn.disabled = true;
+      let uploaded = 0, failed = 0;
+      for(const file of files){
+        if(btn) btn.textContent = `Uploading ${uploaded+failed+1}/${files.length}…`;
+        const url = await uploadSafetyPhoto(file);
+        if(url){ await addQcDiscoveryPhoto(inspectionId, discId, url); uploaded++; }
+        else failed++;
+      }
+      if(btn){ btn.disabled = false; btn.textContent = originalLabel; }
+      if(failed) showToast(`${uploaded} photo${uploaded===1?'':'s'} uploaded, ${failed} failed.`);
+      openQcCheckModal(inspectionId);
+    };
+  });
+  document.querySelectorAll('.qc-disc-photo-remove').forEach(btn=>btn.onclick=()=>{
+    showConfirm('Remove this photo?', async()=>{
+      await removeQcDiscoveryPhoto(inspectionId, btn.dataset.discid, btn.dataset.photoid);
+      openQcCheckModal(inspectionId);
+    });
+  });
+  document.getElementById('qcFinishBtn').onclick = ()=>{
+    if(insp.discoveries.length===0){
+      finishQcInspection(inspectionId, []).then(()=>{
+        showToast('QC Check completed.');
+        openUnitDetail(insp.unitId);
+      });
+    } else {
+      openQcReviewModal(inspectionId);
+    }
+  };
+}
+
+function qcReviewDiscoveryHtml(g, d, idx){
+  const existingSubgroups = [...new Set(g.items.map(it=>it.subgroup).filter(Boolean))];
+  if(!qcReviewDraft[d.id]){
+    qcReviewDraft[d.id] = {decision:'REJECTED', wording:d.description, mergeIntoItemId:'', subgroup: existingSubgroups[0]||'QC'};
+  }
+  const draft = qcReviewDraft[d.id];
+  const related = relatedChecklistItems(g.items, d.description);
+  const whyMatters = d.severity==='High'
+    ? 'High severity — could create meaningful cost, rework, schedule impact, safety risk, warranty issue, or inspection failure if missed.'
+    : d.severity==='Medium'
+    ? 'Medium severity — weigh how likely this is to recur against how much attention a permanent check would cost.'
+    : 'Minor imperfections should generally not become permanent checklist items unless they\'re genuinely likely to recur and worth deliberately checking for every time.';
+  let html = `<div class="card">
+    <div class="item-name">${idx+1}. ${escapeHtml(d.description)}</div>
+    ${d.severity?`<div class="item-meta" style="margin-top:2px;">Severity: ${escapeHtml(d.severity)}</div>`:''}
+    ${d.notes?`<div style="font-size:13px; margin-top:4px;">${escapeHtml(d.notes)}</div>`:''}
+    <div class="helptext" style="margin-top:6px;">Why it matters: ${whyMatters}</div>`;
+  if(related.length){
+    html += `<div class="helptext" style="margin-top:6px;"><b>Possibly already covered by:</b><br>${related.map(it=>`• ${escapeHtml(it.text)}`).join('<br>')}</div>`;
+  }
+  html += `<div class="helptext" style="margin-top:8px; padding:8px; background:var(--surface); border-radius:6px;">Before adding: is this high consequence, reasonably likely to recur, worth actively checking for every time, and not already covered above? If in doubt, merge or don't add — the checklist stays valuable by staying small.</div>`;
+  html += `<div class="row" style="margin-top:10px; gap:6px;">
+    <button class="btn small qc-decision-btn ${draft.decision==='REJECTED'?'':'ghost'}" data-discid="${d.id}" data-decision="REJECTED" style="flex:1;">Don't Add</button>
+    <button class="btn small qc-decision-btn ${draft.decision==='MERGED'?'':'ghost'}" data-discid="${d.id}" data-decision="MERGED" style="flex:1;">Merge</button>
+    <button class="btn small qc-decision-btn ${draft.decision==='NEW'?'':'ghost'}" data-discid="${d.id}" data-decision="NEW" style="flex:1;">Add New</button>
+  </div>`;
+  if(draft.decision==='MERGED'){
+    html += `<label style="margin-top:8px; display:block;">Merge into</label>
+      <select class="qc-merge-select" data-discid="${d.id}">
+        <option value="">— choose an item —</option>
+        ${g.items.map(it=>`<option value="${it.id}" ${draft.mergeIntoItemId===it.id?'selected':''}>${escapeHtml(it.text)}</option>`).join('')}
+      </select>
+      <label style="margin-top:8px; display:block;">New wording for that item</label>
+      <textarea class="qc-wording-input" data-discid="${d.id}" style="min-height:50px;">${escapeHtml(draft.wording)}</textarea>`;
+  } else if(draft.decision==='NEW'){
+    html += `<label style="margin-top:8px; display:block;">Section</label>
+      <select class="qc-subgroup-select" data-discid="${d.id}">
+        ${existingSubgroups.map(s=>`<option value="${escapeHtml(s)}" ${draft.subgroup===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+      </select>
+      <label style="margin-top:8px; display:block;">New checklist item wording</label>
+      <textarea class="qc-wording-input" data-discid="${d.id}" style="min-height:50px;">${escapeHtml(draft.wording)}</textarea>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function openQcReviewModal(inspectionId){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return;
+  const g = state.checklistGroups.find(x=>x.id===insp.groupId);
+  let html = `<h2>Review Discoveries</h2>
+    <div class="helptext" style="margin-bottom:10px;">Decide whether each discovery should change the checklist. The checklist stays small and high-value on purpose — merge or reject whenever an existing item already covers it, or it's unlikely to recur.</div>`;
+  insp.discoveries.forEach((d,i)=>{ html += qcReviewDiscoveryHtml(g, d, i); });
+  html += `<div class="divider"></div>
+    <button class="btn" id="qcConfirmDecisionsBtn" style="width:100%;">Confirm &amp; Finish QC Check</button>
+    <button class="btn small ghost" id="qcReviewBackBtn" style="width:100%; margin-top:8px;">Back to Checklist</button>`;
+  showModal(html);
+  wireQcReviewModal(inspectionId);
+}
+
+function wireQcReviewModal(inspectionId){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return;
+  document.getElementById('qcReviewBackBtn').onclick = ()=>openQcCheckModal(inspectionId);
+  document.querySelectorAll('.qc-decision-btn').forEach(btn=>btn.onclick=()=>{
+    const draft = qcReviewDraft[btn.dataset.discid];
+    if(draft) draft.decision = btn.dataset.decision;
+    openQcReviewModal(inspectionId);
+  });
+  document.querySelectorAll('.qc-merge-select').forEach(sel=>sel.onchange=(e)=>{
+    const draft = qcReviewDraft[e.target.dataset.discid];
+    if(!draft) return;
+    draft.mergeIntoItemId = e.target.value;
+    const g = state.checklistGroups.find(x=>x.id===insp.groupId);
+    const target = g ? g.items.find(it=>it.id===e.target.value) : null;
+    if(target) draft.wording = target.text;
+    openQcReviewModal(inspectionId);
+  });
+  document.querySelectorAll('.qc-subgroup-select').forEach(sel=>sel.onchange=(e)=>{
+    const draft = qcReviewDraft[e.target.dataset.discid];
+    if(draft) draft.subgroup = e.target.value;
+  });
+  document.querySelectorAll('.qc-wording-input').forEach(inp=>inp.onchange=(e)=>{
+    const draft = qcReviewDraft[e.target.dataset.discid];
+    if(draft) draft.wording = e.target.value;
+  });
+  document.getElementById('qcConfirmDecisionsBtn').onclick = async()=>{
+    const decisions = [];
+    for(const d of insp.discoveries){
+      const draft = qcReviewDraft[d.id] || {decision:'REJECTED'};
+      if(draft.decision==='NEW' && !draft.wording.trim()){ showToast('Add wording for the new checklist item.'); return; }
+      if(draft.decision==='MERGED' && (!draft.mergeIntoItemId || !draft.wording.trim())){ showToast('Choose an item to merge into and confirm its wording.'); return; }
+      decisions.push({discoveryId:d.id, decision:draft.decision, wording:draft.wording, mergeIntoItemId:draft.mergeIntoItemId, subgroup:draft.subgroup});
+    }
+    await finishQcInspection(inspectionId, decisions);
+    qcReviewDraft = {};
+    showToast('QC Check completed.');
+    openUnitDetail(insp.unitId);
+  };
+}
+
+function openQcHistoryModal(groupId, unitId){
+  const g = state.checklistGroups.find(x=>x.id===groupId);
+  if(!g) return;
+  const u = state.units.find(x=>x.id===unitId);
+  const versions = state.checklistVersions.filter(v=>v.groupId===groupId).sort((a,b)=>b.versionNumber-a.versionNumber);
+  const inspections = state.qcInspections.filter(q=>q.groupId===groupId && q.unitId===unitId && q.status==='completed')
+    .sort((a,b)=>(b.completedAt||'').localeCompare(a.completedAt||''));
+  let html = `<h2>${escapeHtml(g.name)} — QC History</h2>`;
+  html += `<div class="section-title" style="margin-top:0;">Checklist Version History</div>`;
+  if(versions.length===0){
+    html += `<div class="empty">No version history yet.</div>`;
+  } else {
+    for(const v of versions){
+      html += `<div class="card">
+        <div class="item-name" style="font-size:13px;">Version ${v.versionNumber} — ${fmtDate(v.createdDate)}</div>
+        <div style="font-size:13px; margin-top:4px;">${escapeHtml(v.reason||'')}</div>
+      </div>`;
+    }
+  }
+  html += `<div class="section-title">Inspections at ${escapeHtml(u?u.name:'this unit')}</div>`;
+  if(inspections.length===0){
+    html += `<div class="empty">No completed QC checks yet.</div>`;
+  } else {
+    for(const insp of inspections){
+      const results = Object.values(insp.itemResults);
+      const passCount = results.filter(r=>r==='pass').length;
+      const issueCount = results.filter(r=>r==='issue').length;
+      const naCount = results.filter(r=>r==='na').length;
+      html += `<div class="card qc-insp-row" data-inspid="${insp.id}" style="cursor:pointer;">
+        <div class="item-name" style="font-size:13px;">${fmtDate(insp.completedAt.slice(0,10))} — checklist v${insp.checklistVersionNumber}</div>
+        <div class="item-meta" style="margin-top:4px;">${passCount} pass · ${issueCount} issue · ${naCount} n/a · ${insp.discoveries.length} discover${insp.discoveries.length===1?'y':'ies'}</div>
+      </div>`;
+    }
+  }
+  html += `<div class="divider"></div><button class="btn small ghost" id="qcHistoryBackBtn" style="width:100%;">Close</button>`;
+  showModal(html);
+  document.getElementById('qcHistoryBackBtn').onclick = ()=>openUnitDetail(unitId);
+  document.querySelectorAll('.qc-insp-row').forEach(row=>row.onclick=()=>openQcInspectionDetailModal(row.dataset.inspid));
+}
+
+function openQcInspectionDetailModal(inspectionId){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return;
+  const u = state.units.find(x=>x.id===insp.unitId);
+  let html = `<h2>${escapeHtml(insp.phaseName)} — ${escapeHtml(u?u.name:'')}</h2>
+    <div class="helptext" style="margin-bottom:10px;">Checklist v${insp.checklistVersionNumber} · started ${fmtDate(insp.startedAt.slice(0,10))}${insp.completedAt?' · completed '+fmtDate(insp.completedAt.slice(0,10)):' · in progress'}</div>`;
+  let lastSub;
+  for(const it of insp.checklistSnapshot){
+    if(it.subgroup !== lastSub){
+      html += `<div class="item-meta" style="font-weight:700; margin-top:10px;">${escapeHtml(it.subgroup||'')}</div>`;
+      lastSub = it.subgroup;
+    }
+    const result = insp.itemResults[it.id] || '';
+    const note = insp.itemNotes[it.id] || '';
+    const resultLabel = result==='pass'?'Pass':result==='issue'?'Issue':result==='na'?'N/A':'—';
+    const resultClass = result==='pass'?'done':result==='issue'?'overdue':'open';
+    html += `<div class="card">
+      <div class="row"><div class="item-name" style="font-size:13px;">${escapeHtml(it.text)}</div>
+      <span class="stamp ${resultClass}">${resultLabel}</span></div>
+      ${note?`<div style="font-size:13px; margin-top:4px;">${escapeHtml(note)}</div>`:''}
+    </div>`;
+  }
+  html += `<div class="section-title">Discovered Items<span class="pill">${insp.discoveries.length}</span></div>`;
+  if(insp.discoveries.length===0){
+    html += `<div class="empty">None recorded.</div>`;
+  } else {
+    for(const d of insp.discoveries){
+      html += `<div class="card">
+        <div class="item-name" style="font-size:13px;">${escapeHtml(d.description)}</div>
+        ${d.severity?`<div class="item-meta" style="margin-top:2px;">Severity: ${escapeHtml(d.severity)}</div>`:''}
+        ${d.notes?`<div style="font-size:13px; margin-top:4px;">${escapeHtml(d.notes)}</div>`:''}
+        <div class="item-meta" style="margin-top:6px; font-weight:700;">${escapeHtml(d.decision||'Not reviewed')}</div>
+      </div>`;
+    }
+  }
+  html += `<div class="divider"></div><button class="btn small ghost" id="qcDetailBackBtn" style="width:100%;">Back</button>`;
+  showModal(html);
+  document.getElementById('qcDetailBackBtn').onclick = ()=>openQcHistoryModal(insp.groupId, insp.unitId);
 }
 
 function openUnitDetail(unitId){
@@ -1179,6 +1538,17 @@ function openUnitDetail(unitId){
       e.stopPropagation();
       document.querySelector(`.pcg-additem-btn[data-groupid="${input.dataset.groupid}"]`).click();
     };
+  });
+  document.querySelectorAll('.qc-start-btn').forEach(btn=>btn.onclick=async(e)=>{
+    e.stopPropagation();
+    const qUnitId = btn.dataset.unitid, groupId = btn.dataset.groupid;
+    let insp = qcInspectionInProgress(qUnitId, groupId);
+    if(!insp) insp = await startQcInspection(qUnitId, groupId);
+    openQcCheckModal(insp.id);
+  });
+  document.querySelectorAll('.qc-history-btn').forEach(btn=>btn.onclick=(e)=>{
+    e.stopPropagation();
+    openQcHistoryModal(btn.dataset.groupid, btn.dataset.unitid);
   });
   document.getElementById('udAddDefBtn').onclick = ()=>{
     closeModal();
