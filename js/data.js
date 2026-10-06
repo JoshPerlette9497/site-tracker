@@ -358,7 +358,7 @@ const DEFAULT_MASTER = [
 ];
 
 /* ---------- state ---------- */
-let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[] };
+let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[], checklistVersions:[], qcInspections:[] };
 let activeTab = 'brief';
 let selectedScheduleUnit = null;
 let selectedLogDate = null;
@@ -375,6 +375,12 @@ let defMissingEstimateOnly = false;
 let defOwnerFilter = 'all';
 let unitSearchQuery = '';
 let inactiveUnitsExpanded = false;
+/* QC Phase Check in-progress UI state - which inspection (if any) currently
+   has its "Add Discovered Item" form open, and the draft NEW/MERGED/REJECTED
+   decisions being built up on the review screen before they're confirmed
+   (keyed by discoveryId so progress survives re-rendering the same modal). */
+let qcDiscoveryFormOpenFor = null;
+let qcReviewDraft = {};
 
 const LOG_HISTORY_SEED = [
 {date:'2026-08-04', content:"**AB03:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Josh corrected three undersized door openings in unit 2234 and 2236 basements same-day. CSM Flooring scheduled Fri 8/7 to level unit 2234 basement floor.\n**AB04:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Basement development for unit 2240 underway: IPD completed today, plumbers rough-in/finish tomorrow, HVAC rough-in 8/6, floor leveling 8/7, electrical rough-in 8/10, full inspection 8/11.\n**AB16:** Painters on site, finishing 8/6. CSM Flooring up next, 8/7–8/14.\n**AB17:** Plumbing final on site, finishing 8/6; HVAC final up next. Added deficiencies to verify shelves/mirrors installed and install Slokker Homes powder room mirror.\n**JB01:** Still waiting on permit to begin construction; following up with office/Scott on 8/7.\n**JB12:** No activity change. Following up with C+J Co on NC rate for slab pour.\n**JB20:** No activity change.\n**Site-wide:** Curb stop walk completed — deficiencies logged for AB02/06/07/08/11/12 and AB13–18. Punch list added: bollard light bases, bollard lights install, city sidewalk/81st St/AB18 path."},
@@ -413,6 +419,8 @@ async function loadAll(){
     for(const u of state.units){ if(u.active){ for(const g of state.checklistGroups){ state.groupInstances.push(makeGroupInstance(u.id,g.id)); } } }
     await sset('groupInstances', state.groupInstances);
   }
+  state.checklistVersions = await sget('checklistVersions', []);
+  state.qcInspections = await sget('qcInspections', []);
   if(state.logHistory === null){
     state.logHistory = LOG_HISTORY_SEED.slice();
     await sset('logHistory', state.logHistory);
@@ -431,6 +439,7 @@ async function loadAll(){
   await migrateClearPhaseChecklists_v1();
   await migratePhaseChecklistByPhaseSeed_v1();
   await migrateClearLegacyMasterChecklist_v1();
+  await migrateChecklistGroupVersions_v1();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -731,6 +740,36 @@ async function migrateClearLegacyMasterChecklist_v1(){
   await sset('migrated_clear_legacy_master_checklist_v1', true);
 }
 
+/* Every checklistGroups entry needs a starting version number and a v1
+   snapshot in checklistVersions before the QC Phase Check system can
+   reason about "the version in use" at all - groups created before this
+   feature existed have neither. Runs once, gated by the flag below;
+   anything seeded fresh after this point already carries version:1 from
+   PHASE_CHECKLIST_SEED's own shape (see migratePhaseChecklistByPhaseSeed_v1
+   above), so this only ever touches groups missing it. */
+async function migrateChecklistGroupVersions_v1(){
+  const done = await sget('migrated_checklist_group_versions_v1', false);
+  if(done) return;
+  let changed = false;
+  for(const g of state.checklistGroups){
+    if(!g.version){
+      g.version = 1;
+      state.checklistVersions.push({
+        id: uid(), groupId: g.id, versionNumber: 1, createdDate: todayISO(),
+        items: g.items.map(it=>({...it})),
+        reason: 'Initial checklist version.',
+        originatingInspectionId: null
+      });
+      changed = true;
+    }
+  }
+  if(changed){
+    await sset('checklistGroups', state.checklistGroups);
+    await sset('checklistVersions', state.checklistVersions);
+  }
+  await sset('migrated_checklist_group_versions_v1', true);
+}
+
 /* Loads Josh's "By Phase" rebuild (22 broad QC groups, replacing the empty
    library the clear migration above left behind) and creates an instance of
    each on every active unit. Runs once, gated by the flag below - future
@@ -791,6 +830,170 @@ function groupStatus(due, done, total){
   if(due<today) return 'overdue';
   if(due===today) return 'today';
   return 'open';
+}
+
+/* ---------- QC Phase Check + Controlled Checklist Evolution ----------
+   A deliberately separate system from the boolean itemStatus tracking
+   above (groupInstances) - that tracks ongoing completion of a checklist
+   across a unit's whole lifecycle, while this tracks one-time, repeatable
+   QC audits (Pass/Issue/NA per item) plus "Discovered Items" noticed along
+   the way that are NOT automatically added to the checklist. The checklist
+   (state.checklistGroups) is meant to stay small and high-value; it only
+   changes when a discovery is explicitly reviewed and approved as NEW or
+   MERGED (see finishQcInspection below) - never automatically. */
+
+/* One in-progress QC check per unit+group at a time - starting again while
+   one is already open just resumes it instead of creating a duplicate. */
+function qcInspectionInProgress(unitId, groupId){
+  return state.qcInspections.find(q=>q.unitId===unitId && q.groupId===groupId && q.status==='in_progress') || null;
+}
+
+/* Freezes the checklist's current version + item wording onto the
+   inspection record at the moment it starts, so a later checklist change
+   (from THIS inspection's own review, or any other) can never retroactively
+   alter what an already-performed inspection shows it was checked against. */
+async function startQcInspection(unitId, groupId){
+  const g = state.checklistGroups.find(x=>x.id===groupId);
+  if(!g) return null;
+  const existing = qcInspectionInProgress(unitId, groupId);
+  if(existing) return existing;
+  const inspection = {
+    id: uid(), unitId, groupId, phaseName: g.name,
+    checklistVersionNumber: g.version || 1,
+    checklistSnapshot: g.items.map(it=>({...it})),
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    itemResults: {}, itemNotes: {},
+    discoveries: [],
+    status: 'in_progress'
+  };
+  state.qcInspections.push(inspection);
+  await sset('qcInspections', state.qcInspections);
+  return inspection;
+}
+
+async function setQcItemResult(inspectionId, itemId, result){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return;
+  insp.itemResults[itemId] = result;
+  await sset('qcInspections', state.qcInspections);
+}
+
+async function setQcItemNote(inspectionId, itemId, note){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return;
+  if(note) insp.itemNotes[itemId] = note; else delete insp.itemNotes[itemId];
+  await sset('qcInspections', state.qcInspections);
+}
+
+/* A discovery is an observation, not a checklist change - decision stays
+   null until the Finish-QC-Check review explicitly sets it. */
+async function addQcDiscovery(inspectionId, discovery){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return null;
+  const d = {
+    id: uid(), description: discovery.description, photos: [],
+    notes: discovery.notes || '', severity: discovery.severity || '',
+    decision: null, mergedIntoItemId: null, createdItemId: null,
+    reviewedAt: null, createdAt: new Date().toISOString()
+  };
+  insp.discoveries.push(d);
+  await sset('qcInspections', state.qcInspections);
+  return d;
+}
+
+async function removeQcDiscovery(inspectionId, discoveryId){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return;
+  insp.discoveries = insp.discoveries.filter(d=>d.id!==discoveryId);
+  await sset('qcInspections', state.qcInspections);
+}
+
+async function addQcDiscoveryPhoto(inspectionId, discoveryId, photoUrl){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return;
+  const d = insp.discoveries.find(x=>x.id===discoveryId);
+  if(!d) return;
+  d.photos.push({id:uid(), photoUrl, createdAt:new Date().toISOString()});
+  await sset('qcInspections', state.qcInspections);
+}
+
+async function removeQcDiscoveryPhoto(inspectionId, discoveryId, photoId){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return;
+  const d = insp.discoveries.find(x=>x.id===discoveryId);
+  if(!d) return;
+  d.photos = d.photos.filter(p=>p.id!==photoId);
+  await sset('qcInspections', state.qcInspections);
+}
+
+/* Applies every discovery's NEW/MERGED/REJECTED decision in one pass. Only
+   NEW and MERGED touch the live checklist (state.checklistGroups); REJECTED
+   leaves it untouched entirely - the discovery stays on the inspection
+   record as history, never as a checklist item. If (and only if) at least
+   one NEW/MERGED happened, the group's version number bumps and a new
+   checklistVersions snapshot is recorded with a reason, so the next
+   inspection on any unit picks up the change while every past inspection's
+   own frozen checklistSnapshot stays exactly as it was. */
+async function finishQcInspection(inspectionId, decisions){
+  const insp = state.qcInspections.find(x=>x.id===inspectionId);
+  if(!insp) return null;
+  const g = state.checklistGroups.find(x=>x.id===insp.groupId);
+  const changeReasons = [];
+  for(const dec of decisions){
+    const disc = insp.discoveries.find(d=>d.id===dec.discoveryId);
+    if(!disc) continue;
+    disc.decision = dec.decision;
+    disc.reviewedAt = new Date().toISOString();
+    if(dec.decision==='NEW' && g){
+      const newItem = {id:uid(), text:dec.wording.trim(), subgroup: dec.subgroup || 'QC'};
+      g.items.push(newItem);
+      disc.createdItemId = newItem.id;
+      changeReasons.push(`Added "${newItem.text}" from QC discovery: ${disc.description}`);
+    } else if(dec.decision==='MERGED' && g){
+      const target = g.items.find(it=>it.id===dec.mergeIntoItemId);
+      if(target){
+        const oldText = target.text;
+        target.text = dec.wording.trim();
+        disc.mergedIntoItemId = target.id;
+        changeReasons.push(`Merged QC discovery "${disc.description}" into existing item (was: "${oldText}", now: "${target.text}")`);
+      }
+    }
+  }
+  if(changeReasons.length && g){
+    g.version = (g.version||1) + 1;
+    state.checklistVersions.push({
+      id: uid(), groupId: g.id, versionNumber: g.version, createdDate: todayISO(),
+      items: g.items.map(it=>({...it})),
+      reason: changeReasons.join(' · '),
+      originatingInspectionId: insp.id
+    });
+    await sset('checklistGroups', state.checklistGroups);
+    await sset('checklistVersions', state.checklistVersions);
+  }
+  insp.completedAt = new Date().toISOString();
+  insp.status = 'completed';
+  await sset('qcInspections', state.qcInspections);
+  return insp;
+}
+
+/* Lightweight, non-AI "related existing item" surfacing for the review
+   screen - counts overlapping non-trivial words between the discovery's
+   description and each checklist item's text, so a likely MERGE target is
+   suggested without ever auto-deciding anything. */
+function relatedChecklistItems(groupItems, discoveryText){
+  const words = new Set((discoveryText||'').toLowerCase().split(/\W+/).filter(w=>w.length>3));
+  if(words.size===0) return [];
+  return groupItems
+    .map(it=>{
+      const itWords = (it.text||'').toLowerCase().split(/\W+/).filter(w=>w.length>3);
+      const overlap = itWords.filter(w=>words.has(w)).length;
+      return {it, overlap};
+    })
+    .filter(x=>x.overlap>0)
+    .sort((a,b)=>b.overlap-a.overlap)
+    .slice(0,3)
+    .map(x=>x.it);
 }
 
 const PLAN_DEFAULT_ESTIMATE = 30;
