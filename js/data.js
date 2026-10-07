@@ -381,6 +381,9 @@ let inactiveUnitsExpanded = false;
    (keyed by discoveryId so progress survives re-rendering the same modal). */
 let qcDiscoveryFormOpenFor = null;
 let qcReviewDraft = {};
+/* Week Overload strip (Brief tab) - which day's task list (if any) is
+   currently expanded underneath the strip. Collapsed by default. */
+let expandedWeekStripDay = null;
 
 const LOG_HISTORY_SEED = [
 {date:'2026-08-04', content:"**AB03:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Josh corrected three undersized door openings in unit 2234 and 2236 basements same-day. CSM Flooring scheduled Fri 8/7 to level unit 2234 basement floor.\n**AB04:** Stage 1 finish carpenter on site, finishing Thursday 8/6; cabinet install to follow 8/7–8/11. Basement development for unit 2240 underway: IPD completed today, plumbers rough-in/finish tomorrow, HVAC rough-in 8/6, floor leveling 8/7, electrical rough-in 8/10, full inspection 8/11.\n**AB16:** Painters on site, finishing 8/6. CSM Flooring up next, 8/7–8/14.\n**AB17:** Plumbing final on site, finishing 8/6; HVAC final up next. Added deficiencies to verify shelves/mirrors installed and install Slokker Homes powder room mirror.\n**JB01:** Still waiting on permit to begin construction; following up with office/Scott on 8/7.\n**JB12:** No activity change. Following up with C+J Co on NC rate for slab pour.\n**JB20:** No activity change.\n**Site-wide:** Curb stop walk completed — deficiencies logged for AB02/06/07/08/11/12 and AB13–18. Punch list added: bollard light bases, bollard lights install, city sidewalk/81st St/AB18 path."},
@@ -1118,14 +1121,14 @@ const WEEK_SCHEDULE_SORT_KEY = (a,b)=>
    FLEXIBLE items: must land on/before dueDate, but which day is this
    scheduler's call, not anchored to dueDate at all. Processed in
    due-date-ascending order (the item with the least slack gets first pick
-   of capacity), each one placed on the EARLIEST day in
-   [today, min(dueDate, 5th business day)] that still has room — so a
-   flexible item front-loads into whatever capacity is actually available
-   starting from today, rather than defaulting onto its due date. If
-   nothing in its whole window has room, it's forced onto the day nearest
-   its deadline (may push that day over budget) rather than dropped —
-   dueDate is a hard "must be done by," even for a flexible item.
-   Un-finished flexible items need no separate roll-forward logic: this
+   of capacity), each one placed on the LEAST-LOADED day in
+   [today, dueDate) that still has room for it — load-aware, not just
+   "first day with any space" — so pushing work off a full day spreads it
+   across whatever's actually most free in the rest of the window instead
+   of piling it all onto the very next day in sequence. The due date itself
+   is only used as a last resort: first if no earlier day has room, then
+   (if even the due date is full) forced on anyway, since dueDate is a hard
+   "must be done by," even for a flexible item. Un-finished flexible items need no separate roll-forward logic: this
    whole thing recomputes fresh on every render, so a flexible item still
    open tomorrow just gets re-scheduled fresh alongside everything else,
    per Josh's spec for how rescheduling should work. Escalating a flexible
@@ -1167,18 +1170,32 @@ function computeWeekSchedule(){
     carry = pushed;
   }
 
-  // ---- flexible: earliest-deadline-first, first-fit-from-today ----
+  // ---- flexible: earliest-deadline-first, least-loaded-day-in-window ----
+  // Was first-fit-from-today (earliest day with any room), which is exactly
+  // what stacks everything onto the day right after a busy one once that
+  // day fills — the next flexible item just takes the next day in
+  // sequence, regardless of how full THAT one already is relative to
+  // others further out. Now picks whichever day still has room is least
+  // loaded, strongly preferring a day before the deadline (the window is
+  // searched excluding the due-date day itself first) so the due date
+  // stays a last resort rather than the default landing spot. Ties go to
+  // the earliest such day (front-loading as the tiebreaker, not the
+  // primary key) since the loop only replaces the current best on a
+  // strictly lower load.
   const flexPool = state.defs
     .filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType==='flexible')
     .sort(WEEK_SCHEDULE_SORT_KEY);
   for(const item of flexPool){
     const mins = item.estimatedMinutes || PLAN_DEFAULT_ESTIMATE;
     const windowEndIdx = dayIndexFor(item.dueDate);
-    let placedIdx = -1;
-    for(let i=0; i<=windowEndIdx; i++){
-      if(week[i].used + mins <= budget){ placedIdx = i; break; }
+    let placedIdx = -1, bestUsed = Infinity;
+    for(let i=0; i<windowEndIdx; i++){
+      if(week[i].used + mins <= budget && week[i].used < bestUsed){
+        bestUsed = week[i].used; placedIdx = i;
+      }
     }
-    if(placedIdx===-1) placedIdx = windowEndIdx; // couldn't fit anywhere in the window — force onto the day nearest its deadline
+    if(placedIdx===-1 && week[windowEndIdx].used + mins <= budget) placedIdx = windowEndIdx;
+    if(placedIdx===-1) placedIdx = windowEndIdx; // nothing in the window has room — due date is a hard deadline even for a flexible item, so force it on anyway
     week[placedIdx].flexFits.push(item);
     week[placedIdx].used += mins;
   }

@@ -85,6 +85,7 @@ function renderBrief(){
   }
   html += renderUpcomingScheduleSection();
 
+  html += weekOverloadStrip();
   html += capacitySection();
 
   html += `<div class="section-title">Trade — Due Today/Tomorrow<span class="pill">${tradeDueSoon.length}</span></div>`;
@@ -116,6 +117,7 @@ function renderBrief(){
   wireCardActions();
   wireScheduleActions();
   wireCapacityActions();
+  wireWeekOverloadStrip();
   wireDragReorder();
   wireSafetyWalkthroughActions();
   const triageLink = document.getElementById('needsTriageLink');
@@ -431,6 +433,65 @@ function wireScheduleActions(){
     e.preventDefault();
     const id = e.target.closest('[data-planid]').dataset.planid;
     await clearPlannedDate(id);
+    render();
+  });
+}
+
+/* Week Overload strip: a lightweight, glance-only view of the same 5-day
+   forward projection the Capacity section below already computes (reusing
+   computeWeekSchedule() via buildCapacityForecast() — no second source of
+   truth for load). Not a calendar: shows the rolling 5-BUSINESS-day window
+   starting today (same window as Capacity/Suggested Plan), labeled with
+   real weekday abbreviations, rather than a fixed Mon-Sun block — this app
+   has no weekend capacity budget at all (businessDaysForward skips
+   Sat/Sun), so a rigid calendar week would show meaningless cells for
+   weekends and could include already-past days of the current week with
+   nothing useful to display. Tapping a day expands its task list inline
+   right below the strip - one tap deeper, no new screen. */
+function weekOverloadStrip(){
+  const forecast = buildCapacityForecast();
+  let html = `<div class="section-title" style="margin-top:14px;">Week Overload Check</div>`;
+  html += `<div class="week-strip">`;
+  for(const day of forecast){
+    const pct = day.budget>0 ? day.used/day.budget : 0;
+    // No pre-existing 3-tier threshold anywhere in this app to copy — the
+    // existing Capacity section below is binary (fits/over only). 80% is a
+    // new, judgment-call threshold for the middle "tight" tier.
+    const tier = day.used>day.budget ? 'over' : pct>=0.8 ? 'tight' : 'fits';
+    const selected = expandedWeekStripDay===day.day;
+    html += `<div class="week-strip-day${selected?' selected':''}" data-stripday="${day.day}">
+      <div class="week-strip-day-label">${fmtWeekday(day.day)}</div>
+      <div class="week-strip-bar"><div class="week-strip-bar-fill ${tier}" style="width:${Math.min(100, pct*100)}%;"></div></div>
+      <div class="week-strip-day-mins">${day.used}/${day.budget}m</div>
+    </div>`;
+  }
+  html += `</div>`;
+  if(expandedWeekStripDay){
+    const day = forecast.find(d=>d.day===expandedWeekStripDay);
+    if(day){
+      html += `<div class="card" style="margin-top:8px;">
+        <div class="item-name" style="font-size:13px; margin-bottom:6px;">${fmtDate(day.day)} — ${day.used}/${day.budget}m</div>`;
+      if(day.fits.length===0){
+        html += `<div class="empty">Nothing scheduled this day.</div>`;
+      } else {
+        for(const item of day.fits){
+          html += `<div class="row" style="margin-top:6px; align-items:center;">
+            <div style="flex:1; min-width:0;">
+              <div class="item-name" style="font-size:13px;">${escapeHtml(item.description)}</div>
+              <div class="item-meta">${escapeHtml(item.location||'—')} · ${item.estimatedMinutes||PLAN_DEFAULT_ESTIMATE}m${priorityTag(item)}</div>
+            </div>
+          </div>`;
+        }
+      }
+      html += `</div>`;
+    }
+  }
+  return html;
+}
+function wireWeekOverloadStrip(){
+  document.querySelectorAll('[data-stripday]').forEach(el=>el.onclick=()=>{
+    const day = el.dataset.stripday;
+    expandedWeekStripDay = expandedWeekStripDay===day ? null : day;
     render();
   });
 }

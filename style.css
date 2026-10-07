@@ -185,3 +185,23 @@
     position:absolute; top:10px; right:0; background:var(--brand-dark); color:#fff;
     border:none; border-radius:20px; padding:5px 12px; font-size:12px; font-weight:700;
   }
+  /* Week Overload strip (Brief tab) - a compact per-day load glance, not a
+     calendar grid. No pre-existing filled progress bar anywhere in this
+     app to literally reuse (the existing Capacity section is a plain
+     used/budget stamp, binary fits/over) - this is a small new bar using
+     the same stamp color tokens, extended with a third "tight" tier. */
+  .week-strip{display:flex; gap:6px; margin:8px 4px 0;}
+  .week-strip-day{
+    flex:1; min-width:0; background:var(--surface); border:1px solid var(--line);
+    border-radius:8px; padding:6px 4px; text-align:center; cursor:pointer;
+  }
+  .week-strip-day.selected{border-color:var(--brand-dark); border-width:2px;}
+  .week-strip-day-label{font-size:10px; font-weight:700; color:var(--ink-dim); text-transform:uppercase;}
+  .week-strip-bar{
+    height:6px; border-radius:3px; background:var(--line); margin:5px 0 3px; overflow:hidden;
+  }
+  .week-strip-bar-fill{height:100%; border-radius:3px;}
+  .week-strip-bar-fill.fits{background:var(--stamp-green);}
+  .week-strip-bar-fill.tight{background:var(--stamp-amber);}
+  .week-strip-bar-fill.over{background:var(--stamp-red);}
+  .week-strip-day-mins{font-size:10px; color:var(--ink-dim);}
