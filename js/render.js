@@ -718,6 +718,7 @@ function openEditDefModal(defId, onSaved){
         <option value="flexible" ${d.dueType==='flexible'?'selected':''}>Flexible (auto-scheduled)</option>
       </select></div>
     </div>
+    <div id="edBookingPreview">${d.owner==='Josh' ? bookingPreviewHtml(d.dueDate, d.id) : ''}</div>
     <div class="field-row">
       <div><label>Priority</label>
       <select id="edPriority">
@@ -749,9 +750,16 @@ function openEditDefModal(defId, onSaved){
     <div class="divider"></div>
     <button class="btn" id="edSave" style="width:100%;">Save Changes</button>
   `);
+  const updateEdBookingPreview = ()=>{
+    const owner = document.getElementById('edOwner').value;
+    const dueDate = document.getElementById('edDue').value;
+    document.getElementById('edBookingPreview').innerHTML = (owner==='Josh' && dueDate) ? bookingPreviewHtml(dueDate, d.id) : '';
+  };
   document.getElementById('edOwner').onchange = (e)=>{
     document.getElementById('edEstimateWrap').style.display = e.target.value==='Trade' ? 'none' : '';
+    updateEdBookingPreview();
   };
+  document.getElementById('edDue').oninput = updateEdBookingPreview;
   document.getElementById('edAddNote').onclick = async()=>{
     const text = document.getElementById('edNewNote').value.trim();
     if(!text) return;
@@ -2006,7 +2014,8 @@ function defRowWithActions(d, showDatePicker){
     ${showDatePicker ? `<div class="row" style="margin-top:8px; gap:6px;">
       <input type="date" class="def-quickdate" style="margin-top:0;">
       <button class="btn small def-savedate">Set Date</button>
-    </div>` : ''}
+    </div>
+    ${d.owner==='Josh' ? `<div class="def-quickdate-preview"></div>` : ''}` : ''}
     <div class="row" style="margin-top:8px; gap:6px;">
       ${needsEstimate ? `<select class="def-quickestimate" style="margin-top:0;">${estimateOptionsHtml(d.estimatedMinutes)}</select>` : ''}
       <button class="btn small done-btn def2-done">Mark Done</button>
@@ -2033,7 +2042,14 @@ function wireDefRowActions(){
     showToast('Due date set.');
     render();
   });
-  document.querySelectorAll('.def-quickdate').forEach(el=>el.onclick=(e)=>e.stopPropagation());
+  document.querySelectorAll('.def-quickdate').forEach(el=>{
+    el.onclick=(e)=>e.stopPropagation();
+    el.oninput=(e)=>{
+      const card = e.target.closest('[data-def2]');
+      const preview = card.querySelector('.def-quickdate-preview');
+      if(preview) preview.innerHTML = e.target.value ? bookingPreviewHtml(e.target.value, card.dataset.def2) : '';
+    };
+  });
   document.querySelectorAll('.def-quickestimate').forEach(el=>{
     el.onclick=(e)=>e.stopPropagation();
     el.onchange=async(e)=>{
@@ -2086,7 +2102,28 @@ function openDefImportModal(){
 }
 
 function joshBookingCount(dueDate, excludeId){
-  return state.defs.filter(d=>d.id!==excludeId && d.owner==='Josh' && d.dueDate===dueDate && d.status!=='Done').length;
+  return bookingsForDate(dueDate, excludeId).items.length;
+}
+
+/* Live "what's booked" preview shown under a due-date field while picking
+   it, so Josh can see what else lands on that day before committing to it
+   — not gated behind the >=2 overbook threshold the Save-time warning
+   uses, since even one other item can be worth knowing about. Same
+   fits/tight/over color coding as the Week Overload strip, reusing the
+   identical 80%-of-budget threshold for "tight". */
+function bookingPreviewHtml(dueDate, excludeId){
+  if(!dueDate) return '';
+  const {items, used, budget} = bookingsForDate(dueDate, excludeId);
+  const pct = budget>0 ? used/budget : 0;
+  const tier = used>budget ? 'over' : pct>=0.8 ? 'tight' : 'fits';
+  const color = tier==='over' ? 'var(--stamp-red)' : tier==='tight' ? 'var(--stamp-amber)' : 'var(--ink-dim)';
+  let html = `<div class="helptext" style="margin-top:6px; color:${color};">
+    <b>${items.length} item${items.length===1?'':'s'} · ${used}/${budget}m</b> already booked ${fmtDate(dueDate)}`;
+  if(items.length){
+    html += `<div style="margin-top:2px;">${items.map(it=>`• ${escapeHtml(it.description)} (${it.estimatedMinutes||PLAN_DEFAULT_ESTIMATE}m)`).join('<br>')}</div>`;
+  }
+  html += `</div>`;
+  return html;
 }
 
 /* Quick capture — the deliberately-skipped-until-now "capture button" from
@@ -2163,6 +2200,7 @@ function openDefModal(prefillLocation, onSaved){
         <option value="flexible">Flexible (auto-scheduled)</option>
       </select></div>
     </div>
+    <div id="dBookingPreview"></div>
     <div class="field-row">
       <div><label>Priority</label>
       <select id="dPriority">
@@ -2181,9 +2219,16 @@ function openDefModal(prefillLocation, onSaved){
     <div class="divider"></div>
     <button class="btn" id="dSave">Add Deficiency</button>
   `);
+  const updateDBookingPreview = ()=>{
+    const owner = document.getElementById('dOwner').value;
+    const dueDate = document.getElementById('dDue').value;
+    document.getElementById('dBookingPreview').innerHTML = (owner==='Josh' && dueDate) ? bookingPreviewHtml(dueDate, null) : '';
+  };
   document.getElementById('dOwner').onchange = (e)=>{
     document.getElementById('dEstimateWrap').style.display = e.target.value==='Trade' ? 'none' : '';
+    updateDBookingPreview();
   };
+  document.getElementById('dDue').oninput = updateDBookingPreview;
   document.getElementById('dSave').onclick = async()=>{
     const desc = document.getElementById('dDesc').value.trim();
     if(!desc) return;

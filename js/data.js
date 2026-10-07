@@ -1217,6 +1217,30 @@ function buildCapacityForecast(){
   }));
 }
 
+/* What's actually committed on a specific date, from Josh's perspective —
+   the single source of truth behind both the Add/Edit Deficiency overbook
+   check below and the live "what's booked" preview shown while picking a
+   due date. Prefers the real computed schedule (computeWeekSchedule())
+   when the date falls inside its 5-business-day window, since a flexible
+   item can land on a day other than its own dueDate — a plain dueDate
+   match would miss it. A date further out has no computed placement yet
+   (the window doesn't reach that far), so falls back to a literal dueDate
+   match there. excludeId leaves out the item currently being moved/created
+   so it never counts against itself. */
+function bookingsForDate(dueDate, excludeId){
+  const budget = state.dailyAllowanceMinutes || 480;
+  if(!dueDate) return {items:[], used:0, budget, inWindow:false};
+  const row = computeWeekSchedule().find(w=>w.day===dueDate);
+  if(row){
+    const items = [...row.fixedFits, ...row.flexFits].filter(it=>it.id!==excludeId);
+    const used = items.reduce((n,it)=>n+(it.estimatedMinutes||PLAN_DEFAULT_ESTIMATE), 0);
+    return {items, used, budget, inWindow:true};
+  }
+  const items = state.defs.filter(d=>d.id!==excludeId && d.owner==='Josh' && d.dueDate===dueDate && d.status!=='Done');
+  const used = items.reduce((n,it)=>n+(it.estimatedMinutes||PLAN_DEFAULT_ESTIMATE), 0);
+  return {items, used, budget, inWindow:false};
+}
+
 /* Confirms a capacity-forecast push suggestion: moves the item's real due
    date forward one business day, tracked the same way a checklist
    instance's Push button already tracks a backlog push (pushCount/
