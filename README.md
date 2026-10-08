@@ -167,6 +167,14 @@ After a push, the same day's cascade re-opens showing the updated list (one fewe
 
 Verified in a headless browser: the fixed-deadline confirm blocks a first Save click and applies on the second (and not at all when setting a first-time date, or when editing a flexible item's date); moving a fixed item onto an already-over-capacity day (a single 500m item on a 480m budget, confirmed as a genuinely over-capacity day first) opens the cascade modal showing every item literally dated there; pushing a fixed item shows a confirm and declining leaves its date untouched while accepting bumps it forward and the modal re-shows the updated day; pushing a flexible item with slack applies immediately via a `plannedDate` pin with no confirm, and `computeWeekSchedule()` correctly moves it to the new day on the next render; pushing a flexible item with zero slack (due today) correctly shows the past-the-deadline confirm before applying; the quick-date-picker correctly triggers the cascade offer the same as Add/Edit; and the pre-existing Capacity section Push button now shows the same fixed-deadline confirm.
 
+**Follow-up: wired into the Brief tab directly.** The push cascade above only opened as an automatic side effect of saving a due-date change (Add/Edit Deficiency, the quick-date-picker) — there was no way to reach it just by looking at the Brief tab itself, where the Week Overload strip and Capacity section actually live and where an overloaded day is first noticed. Added direct entry points to both:
+- **Week Overload strip** — the existing tap-to-expand day view (a read-only glance, by original design) now has a "Manage / Push Items" button underneath its item list, opening the same `openCapacityCascadeModal()` for that day.
+- **Capacity section** — every day's card now has a "Manage Day" button, not just days with the forecast's own overflow suggestions — so Josh can open the full push tool (and push a *fitting* item, or a flexible one, not just the forecast's narrower overflow candidates) for any day, over capacity or not.
+
+Both just call the exact same `openCapacityCascadeModal(day)` the rest of this feature already uses — no new modal, no separate logic.
+
+Verified in a headless browser: tapping a day in the Week Overload strip and then "Manage / Push Items" opens the cascade modal with the correct item(s) listed; clicking "Manage Day" on a Capacity-section day card does the same, and pushing an item from that entry point correctly applies (confirm shown, due date bumped, modal re-renders) — plus re-ran every earlier capacity-cascade test (fixed/flexible push, confirms, quick-date-picker trigger) with no regressions.
+
 ## Safety walkthrough photo storage (one-time setup required)
 The daily Safety Walkthrough feature (Brief tab) uploads per-checklist-item
 photos to a Supabase Storage bucket named `hazard-photos` (`js/storage.js`:
