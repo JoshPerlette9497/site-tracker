@@ -1252,8 +1252,14 @@ function computeJoshDayPlan(){
   }
 
   // ---- flexible: earliest-deadline-first, earliest-day-under-cap ----
+  // Included if the real due date falls in the window, OR a manual
+  // plannedDate pin (a deliberate "I'll do this on day X" decision, from
+  // the deferred-item scheduling flow or a capacity-cascade push) lands in
+  // the window — otherwise a far-future item Josh explicitly pinned to a
+  // near-term day would be invisible to this whole engine, pin and all,
+  // until its real deadline eventually entered the window on its own.
   const flexPool = state.defs
-    .filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType==='flexible')
+    .filter(d => openJosh(d) && d.dueType==='flexible' && (d.dueDate<=lastDay || (d.plannedDate && days.includes(d.plannedDate))))
     .sort(WEEK_SCHEDULE_SORT_KEY);
   for(const item of flexPool){
     if(item.effortTier==='quick'){
