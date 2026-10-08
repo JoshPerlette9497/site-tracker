@@ -70,7 +70,7 @@ function renderBrief(){
 
   html += renderSafetyWalkthroughSection();
 
-  html += `<div class="section-title" style="margin-top:14px;">Suggested Plan<span class="pill">${plan.used}/${plan.budget}m</span></div>`;
+  html += `<div class="section-title" style="margin-top:14px;">Suggested Plan<span class="pill">${plan.counted}/${plan.cap} real items</span></div>`;
   if(plan.selected.length===0){
     html += `<div class="empty">Nothing of yours due or overdue today.</div>`;
   } else {
@@ -79,9 +79,10 @@ function renderBrief(){
       : planPhaseCard(item)
     )).join('') + `</div>`;
   }
-  if(plan.deferred.length>0){
-    html += `<div class="section-title" style="margin-top:10px;">Didn't Fit Today<span class="pill">${plan.deferred.length}</span></div>`;
-    html += plan.deferred.map(item=>deferredItemRow(item)).join('');
+  if(plan.conflicts.length>0){
+    html += `<div class="section-title" style="margin-top:10px;">Scheduling Conflicts<span class="pill">${plan.conflicts.length}</span></div>`;
+    html += `<div class="helptext" style="margin-bottom:6px;">These can't fit before their due date without breaking the ${JOSH_DAILY_ITEM_CAP}-item cap — they need your call, not an auto-placement.</div>`;
+    html += plan.conflicts.map(def=>schedulingConflictRow(def)).join('');
   }
   html += renderUpcomingScheduleSection();
 
@@ -369,26 +370,17 @@ function wireSafetyWalkthroughActions(){
   });
 }
 
-/* One overflow (didn't-fit-budget) row from buildSuggestedPlan()'s deferred
-   list, with a way to schedule it to a future day (see plannedDate below). */
-function deferredItemRow(item){
-  const isDef = item.type==='def';
-  const planId = isDef ? 'd_'+item.ref.id : 'c_'+item.groupInstance.id;
-  const name = isDef ? item.ref.description : item.group.name;
-  const site = isDef ? item.ref.location : item.unit.name;
-  const plannedDate = isDef ? item.ref.plannedDate : item.groupInstance.plannedDate;
-  return `<div class="card" data-planid="${escapeHtml(planId)}">
-    <div class="row">
-      <div>
-        <div class="item-name">${escapeHtml(name)}</div>
-        <div class="item-meta">${escapeHtml(site||'—')}${item.due?' · due '+fmtDate(item.due):''} · ${item.minutes}m</div>
-        ${plannedDate?`<div class="item-meta">You planned this for ${fmtDate(plannedDate)} · <a href="#" class="plan-clear-date">clear</a></div>`:''}
-      </div>
-    </div>
-    <div class="row" style="margin-top:8px; gap:6px;">
-      <input type="date" class="plan-quickdate" style="margin-top:0;" min="${addDays(todayISO(),1)}" value="${plannedDate||''}">
-      <button class="btn small plan-savedate">Schedule</button>
-    </div>
+/* One row from buildSuggestedPlan()'s conflicts list — a Josh-owned
+   flexible "30+ minute" item that computeJoshDayPlan() could NOT place on
+   any business day between today and its own due date without breaking
+   the daily item cap. Never silently crammed in or silently dropped; this
+   is the UI surfacing exactly that for Josh to resolve by hand (push the
+   due date, bump something else, or just accept the overage) — clicking
+   it opens the normal Edit modal, same as any other deficiency card. */
+function schedulingConflictRow(def){
+  return `<div class="card overdue conflict-row" data-conflictid="${def.id}" style="cursor:pointer;">
+    <div class="item-name" style="font-size:13px;">${escapeHtml(def.description)}</div>
+    <div class="item-meta">${escapeHtml(def.location||'—')} · due ${fmtDate(def.dueDate)} · no open day before the deadline has room${priorityTag(def)}${deferTag(def)}</div>
   </div>`;
 }
 
@@ -419,27 +411,20 @@ function renderUpcomingScheduleSection(){
 }
 
 function wireScheduleActions(){
-  document.querySelectorAll('.plan-savedate').forEach(b=>b.onclick=async(e)=>{
-    const card = e.target.closest('[data-planid]');
-    const id = card.dataset.planid;
-    const val = card.querySelector('.plan-quickdate').value;
-    if(!val){ showToast('Pick a date first.'); return; }
-    await setPlannedDate(id, val);
-    showToast('Scheduled.');
-    render();
-  });
-  document.querySelectorAll('.plan-quickdate').forEach(el=>el.onclick=(e)=>e.stopPropagation());
   document.querySelectorAll('.plan-clear-date').forEach(a=>a.onclick=async(e)=>{
     e.preventDefault();
     const id = e.target.closest('[data-planid]').dataset.planid;
     await clearPlannedDate(id);
     render();
   });
+  document.querySelectorAll('.conflict-row').forEach(card=>card.onclick=()=>{
+    openEditDefModal(card.dataset.conflictid, render);
+  });
 }
 
 /* Week Overload strip: a lightweight, glance-only view of the same 5-day
    forward projection the Capacity section below already computes (reusing
-   computeWeekSchedule() via buildCapacityForecast() — no second source of
+   computeJoshDayPlan() via buildJoshDayCounts() — no second source of
    truth for load). Not a calendar: shows the rolling 5-BUSINESS-day window
    starting today (same window as Capacity/Suggested Plan), labeled with
    real weekday abbreviations, rather than a fixed Mon-Sun block — this app
@@ -447,22 +432,24 @@ function wireScheduleActions(){
    Sat/Sun), so a rigid calendar week would show meaningless cells for
    weekends and could include already-past days of the current week with
    nothing useful to display. Tapping a day expands its task list inline
-   right below the strip - one tap deeper, no new screen. */
+   right below the strip - one tap deeper, no new screen.
+
+   Count-based, not minutes-based: "fits" is 0-1 of JOSH_DAILY_ITEM_CAP's
+   counting items, "tight" is exactly at the cap, "over" is past it. Quick
+   items are listed in the expanded view (so Josh can still see everything
+   landing that day) but never affect the bar's fill or tier. */
 function weekOverloadStrip(){
-  const forecast = buildCapacityForecast();
+  const forecast = buildJoshDayCounts();
   let html = `<div class="section-title" style="margin-top:14px;">Week Overload Check</div>`;
   html += `<div class="week-strip">`;
   for(const day of forecast){
-    const pct = day.budget>0 ? day.used/day.budget : 0;
-    // No pre-existing 3-tier threshold anywhere in this app to copy — the
-    // existing Capacity section below is binary (fits/over only). 80% is a
-    // new, judgment-call threshold for the middle "tight" tier.
-    const tier = day.used>day.budget ? 'over' : pct>=0.8 ? 'tight' : 'fits';
+    const pct = day.cap>0 ? day.countingCount/day.cap : 0;
+    const tier = day.countingCount>day.cap ? 'over' : day.countingCount===day.cap ? 'tight' : 'fits';
     const selected = expandedWeekStripDay===day.day;
     html += `<div class="week-strip-day${selected?' selected':''}" data-stripday="${day.day}">
       <div class="week-strip-day-label">${fmtWeekday(day.day)}</div>
       <div class="week-strip-bar"><div class="week-strip-bar-fill ${tier}" style="width:${Math.min(100, pct*100)}%;"></div></div>
-      <div class="week-strip-day-mins">${day.used}/${day.budget}m</div>
+      <div class="week-strip-day-mins">${day.countingCount}/${day.cap} items</div>
     </div>`;
   }
   html += `</div>`;
@@ -470,15 +457,15 @@ function weekOverloadStrip(){
     const day = forecast.find(d=>d.day===expandedWeekStripDay);
     if(day){
       html += `<div class="card" style="margin-top:8px;">
-        <div class="item-name" style="font-size:13px; margin-bottom:6px;">${fmtDate(day.day)} — ${day.used}/${day.budget}m</div>`;
-      if(day.fits.length===0){
+        <div class="item-name" style="font-size:13px; margin-bottom:6px;">${fmtDate(day.day)} — ${day.countingCount}/${day.cap} items</div>`;
+      if(day.items.length===0){
         html += `<div class="empty">Nothing scheduled this day.</div>`;
       } else {
-        for(const item of day.fits){
+        for(const item of day.items){
           html += `<div class="row" style="margin-top:6px; align-items:center;">
             <div style="flex:1; min-width:0;">
               <div class="item-name" style="font-size:13px;">${escapeHtml(item.description)}</div>
-              <div class="item-meta">${escapeHtml(item.location||'—')} · ${item.estimatedMinutes||PLAN_DEFAULT_ESTIMATE}m${priorityTag(item)}</div>
+              <div class="item-meta">${escapeHtml(item.location||'—')} · ${item.effortTier==='quick'?'Quick':'30+ min'}${priorityTag(item)}${deferTag(item)}</div>
             </div>
           </div>`;
         }
@@ -501,85 +488,61 @@ function wireWeekOverloadStrip(){
   });
 }
 
-/* Next 5 business days: Josh's own workload vs. his daily budget, with
-   push suggestions (shortest-time-first, same tiebreak as Suggested Plan)
-   for whatever doesn't fit a day. Suggestions are read-only until
-   confirmed via the Push button — nothing here touches a real due date. */
+/* Next 5 business days: Josh's own item count vs. his daily cap of
+   JOSH_DAILY_ITEM_CAP "real" (counting) items. Unlike the old minutes
+   engine, a fixed item never auto-cascades off an over-cap day by itself
+   — there's no "suggest pushing X" list here anymore, since rebalancing a
+   day is always a deliberate choice now. "Manage Day" (the capacity
+   cascade modal) is the one interaction point for actually moving
+   anything. */
 function capacitySection(){
-  const forecast = buildCapacityForecast();
+  const forecast = buildJoshDayCounts();
   let html = `<div class="section-title" style="margin-top:14px;">Capacity — Next 5 Business Days</div>`;
   for(const day of forecast){
-    const over = day.used > day.budget;
-    const toSuggest = [...day.pushed, ...(day.overflow||[])];
+    const over = day.countingCount > day.cap;
     html += `<div class="card${over?' overdue':''}">
       <div class="row">
         <div class="item-name">${fmtDate(day.day)}</div>
-        <span class="stamp ${over?'overdue':'done'}">${day.used}/${day.budget}m</span>
+        <span class="stamp ${over?'overdue':'done'}">${day.countingCount}/${day.cap} items</span>
       </div>
-      <button class="btn small ghost capacity-manage-day" data-manageday="${day.day}" style="width:100%; margin-top:6px;">Manage Day</button>`;
-    if(toSuggest.length){
-      const nextDay = nextBusinessDay(day.day);
-      html += `<div class="item-meta" style="margin-top:6px;">Won't fit — suggest pushing to ${fmtDate(nextDay)}:</div>`;
-      for(const item of toSuggest){
-        html += `<div class="row" data-capacity-def="${item.id}" data-capacity-today="${day.day}" data-capacity-next="${nextDay}" style="margin-top:6px; align-items:center; gap:6px;">
-          <div style="flex:1; min-width:0;">
-            <div class="item-name" style="font-size:13px;">${escapeHtml(item.description)}</div>
-            <div class="item-meta">${escapeHtml(item.location||'—')} · ${item.estimatedMinutes||PLAN_DEFAULT_ESTIMATE}m${priorityTag(item)}</div>
-          </div>
-          <button class="btn small capacity-push">Push</button>
-          <button class="btn small ghost capacity-deny">Keep</button>
-        </div>`;
-      }
-    }
-    html += `</div>`;
+      <button class="btn small ghost capacity-manage-day" data-manageday="${day.day}" style="width:100%; margin-top:6px;">Manage Day</button>
+    </div>`;
   }
   return html;
 }
 function wireCapacityActions(){
   document.querySelectorAll('.capacity-manage-day').forEach(btn=>btn.onclick=()=>openCapacityCascadeModal(btn.dataset.manageday));
-  document.querySelectorAll('.capacity-push').forEach(b=>b.onclick=async(e)=>{
-    const row = e.target.closest('[data-capacity-def]');
-    const doPush = async()=>{
-      await pushDefToNextBusinessDay(row.dataset.capacityDef, row.dataset.capacityToday, row.dataset.capacityNext);
-      showToast('Pushed to '+fmtDate(row.dataset.capacityNext)+'.');
-      render();
-    };
-    // Everything that ever reaches here is already a fixed item (only fixed
-    // overflow is ever offered a push suggestion), but the confirm applies
-    // on principle to any manual move of a fixed deadline, not just the new
-    // capacity-cascade tool below — so it's here too for consistency.
-    showConfirm(`This is marked as a fixed deadline — push it to ${fmtDate(row.dataset.capacityNext)} anyway?`, doPush);
-  });
-  document.querySelectorAll('.capacity-deny').forEach(b=>b.onclick=(e)=>{
-    e.target.closest('[data-capacity-def]').remove();
-  });
 }
 
 /* ---------- Manual capacity cascade (push-to-rebalance) ----------
-   Reuses the exact same computeWeekSchedule()/buildCapacityForecast()
-   capacity data as the Week Overload strip and the Capacity section above
-   — no second source of truth. A purely manual tool: nothing here ever
-   runs on its own, every push is one confirmed click at a time, and
-   pushing an item off one day never silently cascades further — if that
-   creates a new overload on the NEXT day, this just offers to open that
-   day's cascade too, as a separate deliberate step. */
+   Reuses the exact same computeJoshDayPlan()/literalDayBookings() capacity
+   data as the Week Overload strip and the Capacity section above — no
+   second source of truth. A purely manual tool: nothing here ever runs on
+   its own, every push is one confirmed click at a time, and pushing an
+   item off one day never silently cascades further — if that creates a
+   new overload on the NEXT day, this just offers to open that day's
+   cascade too, as a separate deliberate step. Quick items appear in the
+   list (so Josh can see everything booked that day) but their Push button
+   is hidden — they never count toward the cap, so there's never a reason
+   to push one off an over-cap day. */
 function capacityCascadeRowHtml(item, day){
   const isFixed = item.dueType!=='flexible';
   const pinned = !isFixed && item.plannedDate===day;
+  const isQuick = item.effortTier==='quick';
   return `<div class="card" data-cascadeid="${item.id}">
     <div class="item-name" style="font-size:13px;">${escapeHtml(item.description)}</div>
-    <div class="item-meta" style="margin-top:2px;">${escapeHtml(item.location||'—')} · ${item.estimatedMinutes||PLAN_DEFAULT_ESTIMATE}m · ${isFixed?'Fixed':'Flexible'}${pinned?' · 📌 pinned here':''}</div>
-    <div class="row" style="margin-top:8px; gap:6px;">
+    <div class="item-meta" style="margin-top:2px;">${escapeHtml(item.location||'—')} · ${isQuick?'Quick':'30+ min'} · ${isFixed?'Fixed':'Flexible'}${pinned?' · 📌 pinned here':''}${deferTag(item)}</div>
+    ${isQuick ? '' : `<div class="row" style="margin-top:8px; gap:6px;">
       <button class="btn small ghost cascade-push" data-cascadeid="${item.id}" style="flex:1;">Push to next business day</button>
       ${pinned ? `<button class="btn small ghost cascade-unpin" data-cascadeid="${item.id}">Unpin</button>` : ''}
-    </div>
+    </div>`}
   </div>`;
 }
 function openCapacityCascadeModal(day){
   const row = literalDayBookings(day);
-  const over = row.used >= row.budget;
+  const over = row.countingCount >= row.cap;
   let html = `<h2>${fmtDate(day)}</h2>
-    <div class="helptext" style="margin-bottom:10px;">${row.used}/${row.budget}m ${over?'— at or over capacity':'— fits'}</div>`;
+    <div class="helptext" style="margin-bottom:10px;">${row.countingCount}/${row.cap} items ${over?'— at or over the daily cap':'— fits'}</div>`;
   if(row.items.length===0){
     html += `<div class="empty">Nothing booked this day.</div>`;
   } else {
@@ -606,8 +569,8 @@ function wireCapacityCascadeModal(day){
       // deliberate click.
       openCapacityCascadeModal(day);
       const after = literalDayBookings(nextDay);
-      if(after.used>=after.budget){
-        showToast(`Heads up — ${fmtDate(nextDay)} is now at or over capacity too.`);
+      if(after.countingCount>=after.cap){
+        showToast(`Heads up — ${fmtDate(nextDay)} is now at or over the daily cap too.`);
       }
     };
     if(isFixed){
@@ -626,17 +589,19 @@ function wireCapacityCascadeModal(day){
 
 /* After any manual due-date save (Add/Edit/quick-date-picker) on a
    Josh-owned FIXED item, offers the capacity cascade if the day it landed
-   on is now at/over capacity. Scoped to fixed items only — a flexible
-   item's typed due date isn't necessarily where it actually lands (the
-   scheduler picks that), so "the day I just moved this onto" only has a
-   literal, unambiguous meaning for a fixed date. Does nothing (returns
-   false) if there's nothing to offer, so callers can fall through to
-   their own normal finish/close/render. */
+   on is now at/over the daily item cap. Scoped to fixed items only — a
+   flexible item's typed due date isn't necessarily where it actually lands
+   (the scheduler picks that), so "the day I just moved this onto" only has
+   a literal, unambiguous meaning for a fixed date. Also scoped away from
+   Quick items entirely — they never count toward the cap, so a day being
+   "over" is never because of one, and there's nothing useful to offer to
+   push. Does nothing (returns false) if there's nothing to offer, so
+   callers can fall through to their own normal finish/close/render. */
 function maybeOfferCapacityCascade(def){
-  if(def.owner!=='Josh' || !def.dueDate || def.dueType==='flexible') return false;
+  if(def.owner!=='Josh' || !def.dueDate || def.dueType==='flexible' || def.effortTier==='quick') return false;
   const row = literalDayBookings(def.dueDate);
-  if(row.used<row.budget) return false;
-  showToast(`${fmtDate(def.dueDate)} is now at or over capacity.`);
+  if(row.countingCount<row.cap) return false;
+  showToast(`${fmtDate(def.dueDate)} is now at or over the daily cap.`);
   openCapacityCascadeModal(def.dueDate);
   return true;
 }
@@ -666,6 +631,25 @@ function categoryTag(d){
   return '';
 }
 
+/* Purely visual — never tied to priority or any automatic escalation.
+   Shows on any task (Josh's or a trade's) that's been pushed/rescheduled
+   at least once, whether by a manual push, the capacity cascade, or
+   setPlannedDate — the increment points are in data.js. */
+function deferTag(d){
+  const n = d.deferCount||0;
+  return n>0 ? ` · <span style="opacity:0.7;">pushed ${n}x</span>` : '';
+}
+
+/* Josh-only binary duration picker — replaces free-form minute estimation
+   for his own items. "Quick" maps to 10m (exempt from the daily item
+   cap entirely), "Substantial" maps to a flat 30m (counts toward the
+   cap). Trade items never show this — they were never capped or
+   estimated in the first place. */
+function effortTierOptionsHtml(selected){
+  return `<option value="quick" ${selected==='substantial'?'':'selected'}>Quick (a few minutes)</option>
+    <option value="substantial" ${selected==='substantial'?'selected':''}>30 minutes or more</option>`;
+}
+
 function cardForDef(d, st){
   const startedMeta = d.startedAt ? ' · started '+new Date(d.startedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}) : '';
   const verifierMeta = d.verifier ? ' · verify: '+escapeHtml(d.verifier) : '';
@@ -673,7 +657,7 @@ function cardForDef(d, st){
     <div class="row">
       <div>
         <div class="item-name">${escapeHtml(d.description)}</div>
-        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.estimatedMinutes?' · '+d.estimatedMinutes+'m':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${d.followUpDate?' · follow up '+fmtDate(d.followUpDate):''}${startedMeta}${verifierMeta}${priorityTag(d)}${categoryTag(d)}</div>
+        <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):''}${d.status==='WAIT'?' · WAITING':''}${d.pushReason?' · '+escapeHtml(d.pushReason):''}${d.owner==='Josh'?(d.effortTier==='substantial'?' · 30+ min':' · Quick'):(d.estimatedMinutes?' · '+d.estimatedMinutes+'m':'')}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${d.followUpDate?' · follow up '+fmtDate(d.followUpDate):''}${startedMeta}${verifierMeta}${priorityTag(d)}${categoryTag(d)}${deferTag(d)}</div>
       </div>
       <span class="stamp ${st}">${st==='done'?'Done':st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span>
     </div>
@@ -706,14 +690,16 @@ function estimateOptionsHtml(selected){
    hour — a one-shot ask, not a nag: "Not Now" sets subtaskPromptDismissed
    so it never re-asks for this same item again. No AI involved by design —
    Josh names and sizes the subtasks himself, on the spot. */
-function subtaskRowHtml(n){
+function subtaskRowHtml(n, parentIsJosh){
   // Stacked, not a 3-across flex row — cramming a free-text field next to
   // two short controls fought the global width:100% on every input and
   // squeezed the text field down to ~20px, so typing was invisible.
   return `<div class="subtask-row" style="margin-top:12px; padding-top:10px; border-top:1px solid var(--line);">
     <input type="text" class="subtask-text" placeholder="Subtask ${n}" style="margin-top:0;">
     <div class="row" style="gap:6px; margin-top:6px;">
-      <select class="subtask-minutes" style="margin-top:0;">${estimateOptionsHtml()}</select>
+      ${parentIsJosh
+        ? `<select class="subtask-effort" style="margin-top:0;">${effortTierOptionsHtml()}</select>`
+        : `<select class="subtask-minutes" style="margin-top:0;">${estimateOptionsHtml()}</select>`}
       <input type="date" class="subtask-due" title="Due date — leave blank to auto-spread" style="margin-top:0;">
     </div>
   </div>`;
@@ -721,11 +707,12 @@ function subtaskRowHtml(n){
 function openSubtaskPromptModal(defId, onDone){
   const d = state.defs.find(x=>x.id===defId);
   if(!d){ onDone(); return; }
+  const parentIsJosh = d.owner==='Josh';
   showModal(`
     <h2>Break This Down?</h2>
-    <div class="helptext" style="margin-bottom:8px;">"${escapeHtml(d.description)}" is estimated at ${d.estimatedMinutes} min. Split it into smaller subtasks?</div>
+    <div class="helptext" style="margin-bottom:8px;">"${escapeHtml(d.description)}" ${parentIsJosh ? `is ${d.effortTier==='substantial'?'30+ minutes':'Quick'}` : `is estimated at ${d.estimatedMinutes||'—'} min`}. Split it into smaller subtasks?</div>
     <div class="helptext" style="margin-bottom:8px;">Leave a subtask's date blank to spread it automatically across the days between now and ${d.dueDate?fmtDate(d.dueDate):'the due date'} — one per day where possible, so it doesn't all land on one day just because there's room.</div>
-    <div id="subtaskRows">${subtaskRowHtml(1)}</div>
+    <div id="subtaskRows">${subtaskRowHtml(1, parentIsJosh)}</div>
     <button class="btn small ghost" id="addSubtaskRow" style="margin-top:8px;">+ Add Subtask</button>
     <div class="divider"></div>
     <button class="btn" id="saveSubtasks" style="width:100%;">Create Subtasks</button>
@@ -733,12 +720,13 @@ function openSubtaskPromptModal(defId, onDone){
   `);
   document.getElementById('addSubtaskRow').onclick = ()=>{
     const rows = document.getElementById('subtaskRows');
-    rows.insertAdjacentHTML('beforeend', subtaskRowHtml(rows.children.length+1));
+    rows.insertAdjacentHTML('beforeend', subtaskRowHtml(rows.children.length+1, parentIsJosh));
   };
   document.getElementById('saveSubtasks').onclick = async()=>{
     const subtasks = [...document.querySelectorAll('.subtask-row')].map(row=>({
       text: row.querySelector('.subtask-text').value.trim(),
-      minutes: Number(row.querySelector('.subtask-minutes').value) || null,
+      effortTier: parentIsJosh ? row.querySelector('.subtask-effort').value : undefined,
+      minutes: parentIsJosh ? null : (Number(row.querySelector('.subtask-minutes').value) || null),
       dueDate: row.querySelector('.subtask-due').value || null
     })).filter(s=>s.text);
     if(!subtasks.length){ showToast('Add at least one subtask, or tap Not Now.'); return; }
@@ -798,7 +786,6 @@ function openEditDefModal(defId, onSaved){
   const d = state.defs.find(x=>x.id===defId);
   if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
   const originalDueDate = d.dueDate;
-  let overbookConfirmed = false;
   let fixedMoveConfirmed = false;
   const parent = d.parentId ? state.defs.find(x=>x.id===d.parentId) : null;
   const children = state.defs.filter(x=>x.parentId===d.id);
@@ -827,7 +814,7 @@ function openEditDefModal(defId, onSaved){
         <option value="Medium" ${(!d.priority||d.priority==='Medium')?'selected':''}>Medium</option>
         <option value="Low" ${d.priority==='Low'?'selected':''}>Low</option>
       </select></div>
-      <div id="edEstimateWrap" style="${d.owner==='Trade'?'display:none;':''}"><label>Est. Time</label><select id="edEstimate">${estimateOptionsHtml(d.estimatedMinutes)}</select></div>
+      <div id="edEstimateWrap" style="${d.owner==='Josh'?'':'display:none;'}"><label>How much time?</label><select id="edEstimate">${effortTierOptionsHtml(d.effortTier)}</select></div>
     </div>
     <label>Category</label>
     <select id="edCategory">
@@ -857,7 +844,7 @@ function openEditDefModal(defId, onSaved){
     document.getElementById('edBookingPreview').innerHTML = (owner==='Josh' && dueDate) ? bookingPreviewHtml(dueDate, d.id) : '';
   };
   document.getElementById('edOwner').onchange = (e)=>{
-    document.getElementById('edEstimateWrap').style.display = e.target.value==='Trade' ? 'none' : '';
+    document.getElementById('edEstimateWrap').style.display = e.target.value==='Josh' ? '' : 'none';
     updateEdBookingPreview();
   };
   document.getElementById('edDue').oninput = updateEdBookingPreview;
@@ -894,21 +881,10 @@ function openEditDefModal(defId, onSaved){
       document.getElementById('edSave').textContent = 'Save Changes Anyway';
       return;
     }
-    // The overbook warning only makes sense for a fixed date — it's
-    // protecting against cramming too many hard-anchored items onto one
-    // day, but a flexible item's whole point is that the scheduler spreads
-    // it out automatically, so the same nag here would just be noise.
-    if(owner==='Josh' && dueDate && dueType==='fixed' && !overbookConfirmed){
-      const count = joshBookingCount(dueDate, d.id);
-      if(count>=2){
-        overbookConfirmed = true;
-        const warn = document.getElementById('edOverbookWarning');
-        warn.style.display = 'block';
-        warn.textContent = `You already have ${count} items of yours due ${fmtDate(dueDate)}. Tap Save Changes again to save anyway.`;
-        document.getElementById('edSave').textContent = 'Save Anyway';
-        return;
-      }
-    }
+    // No pre-save overbook gate here (removed) — the post-save capacity
+    // cascade offer below (maybeOfferCapacityCascade) covers the same case
+    // more precisely (actual cap count, not a guess made before the save),
+    // so a second gate here was just redundant friction.
     d.description = desc;
     d.owner = owner;
     d.dueDate = dueDate;
@@ -920,15 +896,20 @@ function openEditDefModal(defId, onSaved){
     d.category = document.getElementById('edCategory').value;
     d.verifier = document.getElementById('edVerifier').value.trim() || null;
     d.followUpDate = document.getElementById('edFollowUp').value || null;
-    const estVal = document.getElementById('edEstimate').value;
-    d.estimatedMinutes = (owner!=='Trade' && estVal) ? Number(estVal) : null;
+    if(owner==='Josh'){
+      d.effortTier = document.getElementById('edEstimate').value;
+      d.estimatedMinutes = d.effortTier==='substantial' ? 30 : 10;
+    } else {
+      d.effortTier = undefined;
+      d.estimatedMinutes = null;
+    }
     await sset('defs', state.defs);
     const finish = ()=>{
       showToast('Deficiency updated.');
       if(onSaved) onSaved();
       if(dueDate !== originalDueDate) maybeOfferCapacityCascade(d);
     };
-    if(d.estimatedMinutes >= 30 && d.status!=='Done' && !d.subtaskPromptDismissed){
+    if(d.effortTier==='substantial' && d.status!=='Done' && !d.subtaskPromptDismissed){
       openSubtaskPromptModal(d.id, finish);
     } else {
       closeModal();
@@ -2104,7 +2085,7 @@ function defRowDone(d){
   return `<div class="card done def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" data-owner="${escapeHtml(d.owner||'')}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}${categoryTag(d)}${subtaskLineageTag(d)}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.completedDate?' · completed '+fmtDate(d.completedDate):''}${priorityTag(d)}${categoryTag(d)}${subtaskLineageTag(d)}${deferTag(d)}</div>
     </div><span class="stamp done">Done</span></div>
   </div>`;
 }
@@ -2123,11 +2104,11 @@ function subtaskEditRowHtml(c){
 
 function defRowWithActions(d, showDatePicker){
   const st = dueStatus(d.dueDate, d.status);
-  const needsEstimate = d.owner!=='Trade';
+  const needsEffort = d.owner==='Josh';
   return `<div class="card ${st} def2-card" data-def2="${d.id}" data-hasestimate="${d.estimatedMinutes?'1':'0'}" data-owner="${escapeHtml(d.owner||'')}" style="cursor:pointer;">
     <div class="row"><div>
       <div class="item-name">${escapeHtml(d.description)}</div>
-      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${priorityTag(d)}${categoryTag(d)}${subtaskLineageTag(d)}</div>
+      <div class="item-meta">${escapeHtml(d.location||'—')} · ${escapeHtml(d.owner||'Unassigned')}${d.dueDate?' · due '+fmtDate(d.dueDate):' · no due date'}${d.status==='WAIT'?' · WAITING':''}${d.plannedDate?' · planned '+fmtDate(d.plannedDate):''}${priorityTag(d)}${categoryTag(d)}${subtaskLineageTag(d)}${deferTag(d)}</div>
     </div><span class="stamp ${st}">${st==='overdue'?'Overdue':st==='today'?'Today':'Open'}</span></div>
     ${showDatePicker ? `<div class="row" style="margin-top:8px; gap:6px;">
       <input type="date" class="def-quickdate" style="margin-top:0;">
@@ -2135,7 +2116,7 @@ function defRowWithActions(d, showDatePicker){
     </div>
     ${d.owner==='Josh' ? `<div class="def-quickdate-preview"></div>` : ''}` : ''}
     <div class="row" style="margin-top:8px; gap:6px;">
-      ${needsEstimate ? `<select class="def-quickestimate" style="margin-top:0;">${estimateOptionsHtml(d.estimatedMinutes)}</select>` : ''}
+      ${needsEffort ? `<select class="def-quickestimate" style="margin-top:0;">${effortTierOptionsHtml(d.effortTier)}</select>` : ''}
       <button class="btn small done-btn def2-done">Mark Done</button>
     </div>
   </div>`;
@@ -2176,9 +2157,9 @@ function wireDefRowActions(){
       const id = card.dataset.def2;
       const d2 = state.defs.find(d=>d.id===id);
       if(!d2) return;
-      const val = e.target.value;
-      d2.estimatedMinutes = val ? Number(val) : null;
-      card.dataset.hasestimate = val ? '1' : '0';
+      d2.effortTier = e.target.value;
+      d2.estimatedMinutes = e.target.value==='substantial' ? 30 : 10;
+      card.dataset.hasestimate = '1';
       await sset('defs', state.defs);
       applyDefSearchFilter();
     };
@@ -2204,11 +2185,14 @@ function openDefImportModal(){
       for(const r of raw){
         const dup = state.defs.some(d=>d.description===r.description && d.location===r.location);
         if(dup){ skipped++; continue; }
+        const effortTier = r.owner==='Josh' ? (r.effortTier==='substantial'?'substantial':'quick') : undefined;
         state.defs.push({
           id:uid(), location:r.location||'', description:r.description||'(no description)',
           owner:r.owner||'Unassigned', status:r.status||'DO', dueDate:r.dueDate||null, dueType:r.dueType||'fixed',
           priority:r.priority||'Medium',
-          pushCount:r.pushCount||0, pushReason:r.pushReason||'',
+          effortTier,
+          estimatedMinutes: effortTier ? (effortTier==='substantial'?30:10) : null,
+          pushCount:r.pushCount||0, deferCount:r.deferCount||r.pushCount||0, pushReason:r.pushReason||'',
           verifier:r.verifier||null, followUpDate:r.followUpDate||null, startedAt:null, notes:[]
         });
         added++;
@@ -2220,26 +2204,22 @@ function openDefImportModal(){
   };
 }
 
-function joshBookingCount(dueDate, excludeId){
-  return bookingsForDate(dueDate, excludeId).items.length;
-}
-
 /* Live "what's booked" preview shown under a due-date field while picking
    it, so Josh can see what else lands on that day before committing to it
-   — not gated behind the >=2 overbook threshold the Save-time warning
-   uses, since even one other item can be worth knowing about. Same
-   fits/tight/over color coding as the Week Overload strip, reusing the
-   identical 80%-of-budget threshold for "tight". */
+   — not gated behind the cap threshold the Save-time warning uses, since
+   even one other item can be worth knowing about. Same fits/tight/over
+   color coding as the Week Overload strip — counting against the daily
+   item cap, not minutes. Quick items are listed too (so nothing booked
+   that day is hidden) but never affect the tier. */
 function bookingPreviewHtml(dueDate, excludeId){
   if(!dueDate) return '';
-  const {items, used, budget} = bookingsForDate(dueDate, excludeId);
-  const pct = budget>0 ? used/budget : 0;
-  const tier = used>budget ? 'over' : pct>=0.8 ? 'tight' : 'fits';
+  const {items, countingCount, cap} = bookingsForDate(dueDate, excludeId);
+  const tier = countingCount>cap ? 'over' : countingCount===cap ? 'tight' : 'fits';
   const color = tier==='over' ? 'var(--stamp-red)' : tier==='tight' ? 'var(--stamp-amber)' : 'var(--ink-dim)';
   let html = `<div class="helptext" style="margin-top:6px; color:${color};">
-    <b>${items.length} item${items.length===1?'':'s'} · ${used}/${budget}m</b> already booked ${fmtDate(dueDate)}`;
+    <b>${countingCount}/${cap} items</b> already booked ${fmtDate(dueDate)}`;
   if(items.length){
-    html += `<div style="margin-top:2px;">${items.map(it=>`• ${escapeHtml(it.description)} (${it.estimatedMinutes||PLAN_DEFAULT_ESTIMATE}m)`).join('<br>')}</div>`;
+    html += `<div style="margin-top:2px;">${items.map(it=>`• ${escapeHtml(it.description)} (${it.effortTier==='quick'?'Quick':'30+ min'})`).join('<br>')}</div>`;
   }
   html += `</div>`;
   return html;
@@ -2280,7 +2260,7 @@ function openCaptureModal(){
     state.defs.push({
       id:uid(), location:document.getElementById('capLocation').value, description:text,
       owner:'Unassigned', dueDate:null, dueType:'fixed', priority:'Medium', category:'Construction',
-      estimatedMinutes:null, status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
+      estimatedMinutes:null, status:'DO', pushCount:0, deferCount:0, pushReason:'', createdDate:todayISO(),
       verifier:null, followUpDate:null, startedAt:null, notes:[]
     });
     await sset('defs', state.defs);
@@ -2301,7 +2281,6 @@ function openDefModal(prefillLocation, onSaved){
     ? state.units.find(u=>u.name===prefillLocation) : null;
   const unitOptions = [...activeUnits, ...(prefillUnit?[prefillUnit]:[])]
     .map(u=>`<option value="${escapeHtml(u.name)}" ${u.name===prefillLocation?'selected':''}>${escapeHtml(u.name)}</option>`).join('');
-  let overbookConfirmed = false;
   showModal(`
     <h2>Add Deficiency</h2>
     <label>Location</label>
@@ -2310,7 +2289,7 @@ function openDefModal(prefillLocation, onSaved){
       ${unitOptions}
     </select>
     <label>Description</label><textarea id="dDesc" style="min-height:60px;"></textarea>
-    <label>Owner</label><select id="dOwner"><option>Trade</option><option>Josh</option><option>Unassigned</option></select>
+    <label>Owner</label><select id="dOwner"><option>Trade</option><option>Josh</option></select>
     <div class="field-row">
       <div><label>Due Date</label><input id="dDue" type="date"></div>
       <div><label>Schedule</label>
@@ -2327,14 +2306,13 @@ function openDefModal(prefillLocation, onSaved){
         <option value="Medium" selected>Medium</option>
         <option value="Low">Low</option>
       </select></div>
-      <div id="dEstimateWrap" style="display:none;"><label>Est. Time</label><select id="dEstimate">${estimateOptionsHtml()}</select></div>
+      <div id="dEstimateWrap" style="display:none;"><label>How much time?</label><select id="dEstimate">${effortTierOptionsHtml()}</select></div>
     </div>
     <label>Category</label>
     <select id="dCategory">
       <option value="Construction" selected>Construction</option>
       <option value="Safety">Safety</option>
     </select>
-    <div id="dOverbookWarning" class="helptext" style="color:var(--stamp-amber); display:none; margin-top:8px;"></div>
     <div class="divider"></div>
     <button class="btn" id="dSave">Add Deficiency</button>
   `);
@@ -2344,7 +2322,7 @@ function openDefModal(prefillLocation, onSaved){
     document.getElementById('dBookingPreview').innerHTML = (owner==='Josh' && dueDate) ? bookingPreviewHtml(dueDate, null) : '';
   };
   document.getElementById('dOwner').onchange = (e)=>{
-    document.getElementById('dEstimateWrap').style.display = e.target.value==='Trade' ? 'none' : '';
+    document.getElementById('dEstimateWrap').style.display = e.target.value==='Josh' ? '' : 'none';
     updateDBookingPreview();
   };
   document.getElementById('dDue').oninput = updateDBookingPreview;
@@ -2354,24 +2332,16 @@ function openDefModal(prefillLocation, onSaved){
     const owner = document.getElementById('dOwner').value;
     const dueDate = document.getElementById('dDue').value || null;
     const dueType = document.getElementById('dDueType').value;
-    if(owner==='Josh' && dueDate && dueType==='fixed' && !overbookConfirmed){
-      const count = joshBookingCount(dueDate);
-      if(count>=2){
-        overbookConfirmed = true;
-        const warn = document.getElementById('dOverbookWarning');
-        warn.style.display = 'block';
-        warn.textContent = `You already have ${count} items of yours due ${fmtDate(dueDate)}. Tap Add Deficiency again to add anyway.`;
-        document.getElementById('dSave').textContent = 'Add Anyway';
-        return;
-      }
-    }
-    const estVal = document.getElementById('dEstimate').value;
+    // No pre-save overbook gate here (removed, same as Edit) — the
+    // post-save capacity cascade offer below covers it more precisely.
+    const effortTier = owner==='Josh' ? document.getElementById('dEstimate').value : undefined;
     const newDef = {
       id:uid(), location:document.getElementById('dLocation').value, description:desc,
       owner, dueDate, dueType, priority:document.getElementById('dPriority').value,
       category: document.getElementById('dCategory').value,
-      estimatedMinutes: (owner!=='Trade' && estVal) ? Number(estVal) : null,
-      status:'DO', pushCount:0, pushReason:'', createdDate:todayISO(),
+      effortTier,
+      estimatedMinutes: effortTier ? (effortTier==='substantial'?30:10) : null,
+      status:'DO', pushCount:0, deferCount:0, pushReason:'', createdDate:todayISO(),
       verifier:null, followUpDate:null, startedAt:null, notes:[]
     };
     state.defs.push(newDef);
@@ -2380,7 +2350,7 @@ function openDefModal(prefillLocation, onSaved){
       if(onSaved) onSaved(); else render();
       maybeOfferCapacityCascade(newDef);
     };
-    if(newDef.estimatedMinutes >= 30) openSubtaskPromptModal(newDef.id, finish);
+    if(newDef.effortTier==='substantial') openSubtaskPromptModal(newDef.id, finish);
     else { closeModal(); finish(); }
   };
 }
