@@ -532,13 +532,106 @@ function capacitySection(){
 function wireCapacityActions(){
   document.querySelectorAll('.capacity-push').forEach(b=>b.onclick=async(e)=>{
     const row = e.target.closest('[data-capacity-def]');
-    await pushDefToNextBusinessDay(row.dataset.capacityDef, row.dataset.capacityToday, row.dataset.capacityNext);
-    showToast('Pushed to '+fmtDate(row.dataset.capacityNext)+'.');
-    render();
+    const doPush = async()=>{
+      await pushDefToNextBusinessDay(row.dataset.capacityDef, row.dataset.capacityToday, row.dataset.capacityNext);
+      showToast('Pushed to '+fmtDate(row.dataset.capacityNext)+'.');
+      render();
+    };
+    // Everything that ever reaches here is already a fixed item (only fixed
+    // overflow is ever offered a push suggestion), but the confirm applies
+    // on principle to any manual move of a fixed deadline, not just the new
+    // capacity-cascade tool below — so it's here too for consistency.
+    showConfirm(`This is marked as a fixed deadline — push it to ${fmtDate(row.dataset.capacityNext)} anyway?`, doPush);
   });
   document.querySelectorAll('.capacity-deny').forEach(b=>b.onclick=(e)=>{
     e.target.closest('[data-capacity-def]').remove();
   });
+}
+
+/* ---------- Manual capacity cascade (push-to-rebalance) ----------
+   Reuses the exact same computeWeekSchedule()/buildCapacityForecast()
+   capacity data as the Week Overload strip and the Capacity section above
+   — no second source of truth. A purely manual tool: nothing here ever
+   runs on its own, every push is one confirmed click at a time, and
+   pushing an item off one day never silently cascades further — if that
+   creates a new overload on the NEXT day, this just offers to open that
+   day's cascade too, as a separate deliberate step. */
+function capacityCascadeRowHtml(item, day){
+  const isFixed = item.dueType!=='flexible';
+  const pinned = !isFixed && item.plannedDate===day;
+  return `<div class="card" data-cascadeid="${item.id}">
+    <div class="item-name" style="font-size:13px;">${escapeHtml(item.description)}</div>
+    <div class="item-meta" style="margin-top:2px;">${escapeHtml(item.location||'—')} · ${item.estimatedMinutes||PLAN_DEFAULT_ESTIMATE}m · ${isFixed?'Fixed':'Flexible'}${pinned?' · 📌 pinned here':''}</div>
+    <div class="row" style="margin-top:8px; gap:6px;">
+      <button class="btn small ghost cascade-push" data-cascadeid="${item.id}" style="flex:1;">Push to next business day</button>
+      ${pinned ? `<button class="btn small ghost cascade-unpin" data-cascadeid="${item.id}">Unpin</button>` : ''}
+    </div>
+  </div>`;
+}
+function openCapacityCascadeModal(day){
+  const row = literalDayBookings(day);
+  const over = row.used >= row.budget;
+  let html = `<h2>${fmtDate(day)}</h2>
+    <div class="helptext" style="margin-bottom:10px;">${row.used}/${row.budget}m ${over?'— at or over capacity':'— fits'}</div>`;
+  if(row.items.length===0){
+    html += `<div class="empty">Nothing booked this day.</div>`;
+  } else {
+    for(const item of row.items){ html += capacityCascadeRowHtml(item, day); }
+  }
+  html += `<div class="divider"></div><button class="btn small ghost" id="cascadeCloseBtn" style="width:100%;">Close</button>`;
+  showModal(html);
+  document.getElementById('cascadeCloseBtn').onclick = closeModal;
+  wireCapacityCascadeModal(day);
+}
+function wireCapacityCascadeModal(day){
+  document.querySelectorAll('.cascade-push').forEach(btn=>btn.onclick=()=>{
+    const id = btn.dataset.cascadeid;
+    const item = state.defs.find(x=>x.id===id);
+    if(!item) return;
+    const nextDay = nextBusinessDay(day);
+    const isFixed = item.dueType!=='flexible';
+    const doPush = async()=>{
+      await pushDefToNextBusinessDay(id, day, nextDay);
+      showToast(`Pushed to ${fmtDate(nextDay)}.`);
+      // The item just left `day`, so re-show this same day's cascade with
+      // the updated list; separately offer the next day's cascade if THAT
+      // now needs the same treatment — never auto-opened, always one more
+      // deliberate click.
+      openCapacityCascadeModal(day);
+      const after = literalDayBookings(nextDay);
+      if(after.used>=after.budget){
+        showToast(`Heads up — ${fmtDate(nextDay)} is now at or over capacity too.`);
+      }
+    };
+    if(isFixed){
+      showConfirm(`"${item.description}" is marked as a fixed deadline — push it to ${fmtDate(nextDay)} anyway?`, doPush);
+    } else if(nextDay > item.dueDate){
+      showConfirm(`Pushing "${item.description}" to ${fmtDate(nextDay)} would move it past its own due date of ${fmtDate(item.dueDate)} — push anyway?`, doPush);
+    } else {
+      doPush();
+    }
+  });
+  document.querySelectorAll('.cascade-unpin').forEach(btn=>btn.onclick=async()=>{
+    await clearPlannedDate('d_'+btn.dataset.cascadeid);
+    openCapacityCascadeModal(day);
+  });
+}
+
+/* After any manual due-date save (Add/Edit/quick-date-picker) on a
+   Josh-owned FIXED item, offers the capacity cascade if the day it landed
+   on is now at/over capacity. Scoped to fixed items only — a flexible
+   item's typed due date isn't necessarily where it actually lands (the
+   scheduler picks that), so "the day I just moved this onto" only has a
+   literal, unambiguous meaning for a fixed date. Does nothing (returns
+   false) if there's nothing to offer, so callers can fall through to
+   their own normal finish/close/render. */
+function maybeOfferCapacityCascade(def){
+  if(def.owner!=='Josh' || !def.dueDate || def.dueType==='flexible') return false;
+  const row = literalDayBookings(def.dueDate);
+  if(row.used<row.budget) return false;
+  showToast(`${fmtDate(def.dueDate)} is now at or over capacity.`);
+  openCapacityCascadeModal(def.dueDate);
+  return true;
 }
 
 function planPhaseCard(item){
@@ -699,6 +792,7 @@ function openEditDefModal(defId, onSaved){
   if(!d){ showToast('Could not find that deficiency — try reloading.'); return; }
   const originalDueDate = d.dueDate;
   let overbookConfirmed = false;
+  let fixedMoveConfirmed = false;
   const parent = d.parentId ? state.defs.find(x=>x.id===d.parentId) : null;
   const children = state.defs.filter(x=>x.parentId===d.id);
   showModal(`
@@ -780,6 +874,19 @@ function openEditDefModal(defId, onSaved){
     const owner = document.getElementById('edOwner').value;
     const dueDate = document.getElementById('edDue').value || null;
     const dueType = document.getElementById('edDueType').value;
+    // A lightweight guard against accidentally sliding a hard commitment —
+    // not a block, just a confirm, since the system itself still never
+    // moves a fixed item on its own; this only fires when an EXISTING
+    // fixed date is actually being changed, not when one's being set for
+    // the first time (that's not "moving" anything yet).
+    if(dueType==='fixed' && originalDueDate && dueDate!==originalDueDate && !fixedMoveConfirmed){
+      fixedMoveConfirmed = true;
+      const warn = document.getElementById('edOverbookWarning');
+      warn.style.display = 'block';
+      warn.textContent = `This is marked as a fixed deadline — tap Save Changes again to move it anyway.`;
+      document.getElementById('edSave').textContent = 'Save Changes Anyway';
+      return;
+    }
     // The overbook warning only makes sense for a fixed date — it's
     // protecting against cramming too many hard-anchored items onto one
     // day, but a flexible item's whole point is that the scheduler spreads
@@ -809,7 +916,11 @@ function openEditDefModal(defId, onSaved){
     const estVal = document.getElementById('edEstimate').value;
     d.estimatedMinutes = (owner!=='Trade' && estVal) ? Number(estVal) : null;
     await sset('defs', state.defs);
-    const finish = ()=>{ showToast('Deficiency updated.'); if(onSaved) onSaved(); };
+    const finish = ()=>{
+      showToast('Deficiency updated.');
+      if(onSaved) onSaved();
+      if(dueDate !== originalDueDate) maybeOfferCapacityCascade(d);
+    };
     if(d.estimatedMinutes >= 30 && d.status!=='Done' && !d.subtaskPromptDismissed){
       openSubtaskPromptModal(d.id, finish);
     } else {
@@ -2041,6 +2152,7 @@ function wireDefRowActions(){
     await sset('defs', state.defs);
     showToast('Due date set.');
     render();
+    maybeOfferCapacityCascade(d2);
   });
   document.querySelectorAll('.def-quickdate').forEach(el=>{
     el.onclick=(e)=>e.stopPropagation();
@@ -2257,7 +2369,10 @@ function openDefModal(prefillLocation, onSaved){
     };
     state.defs.push(newDef);
     await sset('defs', state.defs);
-    const finish = ()=>{ if(onSaved) onSaved(); else render(); };
+    const finish = ()=>{
+      if(onSaved) onSaved(); else render();
+      maybeOfferCapacityCascade(newDef);
+    };
     if(newDef.estimatedMinutes >= 30) openSubtaskPromptModal(newDef.id, finish);
     else { closeModal(); finish(); }
   };

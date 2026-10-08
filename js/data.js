@@ -1171,31 +1171,44 @@ function computeWeekSchedule(){
   }
 
   // ---- flexible: earliest-deadline-first, least-loaded-day-in-window ----
-  // Was first-fit-from-today (earliest day with any room), which is exactly
-  // what stacks everything onto the day right after a busy one once that
-  // day fills — the next flexible item just takes the next day in
-  // sequence, regardless of how full THAT one already is relative to
-  // others further out. Now picks whichever day still has room is least
-  // loaded, strongly preferring a day before the deadline (the window is
-  // searched excluding the due-date day itself first) so the due date
-  // stays a last resort rather than the default landing spot. Ties go to
-  // the earliest such day (front-loading as the tiebreaker, not the
-  // primary key) since the loop only replaces the current best on a
-  // strictly lower load.
+  // (unless manually pinned — see plannedDate check below)
   const flexPool = state.defs
     .filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType==='flexible')
     .sort(WEEK_SCHEDULE_SORT_KEY);
   for(const item of flexPool){
     const mins = item.estimatedMinutes || PLAN_DEFAULT_ESTIMATE;
     const windowEndIdx = dayIndexFor(item.dueDate);
-    let placedIdx = -1, bestUsed = Infinity;
-    for(let i=0; i<windowEndIdx; i++){
-      if(week[i].used + mins <= budget && week[i].used < bestUsed){
-        bestUsed = week[i].used; placedIdx = i;
-      }
+    let placedIdx = -1;
+    // Manual push (capacity cascade, js/render.js openCapacityCascadeModal)
+    // pins a flexible item to a specific day via plannedDate — the same
+    // field Josh's own "I'll actually do this Thursday" deferred-item
+    // scheduling already uses, just read here too now. Only honored while
+    // it's still a real choice: within today..dueDate and inside this
+    // window: a stale pin (dueDate moved past it, or it's fallen outside
+    // the window) is silently ignored and the item falls back to normal
+    // auto-placement, same as every other invalidation of this field.
+    if(item.plannedDate){
+      const pinnedIdx = days.indexOf(item.plannedDate);
+      if(pinnedIdx!==-1 && pinnedIdx<=windowEndIdx) placedIdx = pinnedIdx;
     }
-    if(placedIdx===-1 && week[windowEndIdx].used + mins <= budget) placedIdx = windowEndIdx;
-    if(placedIdx===-1) placedIdx = windowEndIdx; // nothing in the window has room — due date is a hard deadline even for a flexible item, so force it on anyway
+    if(placedIdx===-1){
+      // Prefer a day strictly before the deadline (front-loading), picking
+      // whichever such day currently has the LEAST committed load — not
+      // just the first one with room — so pushing work off a busy day
+      // spreads it across what's actually most free, instead of piling
+      // everything onto the very next day in sequence. Ties go to the
+      // earliest such day (front-loading as the tiebreaker, not the
+      // primary key) since the loop only replaces the current best on a
+      // strictly lower load.
+      let bestUsed = Infinity;
+      for(let i=0; i<windowEndIdx; i++){
+        if(week[i].used + mins <= budget && week[i].used < bestUsed){
+          bestUsed = week[i].used; placedIdx = i;
+        }
+      }
+      if(placedIdx===-1 && week[windowEndIdx].used + mins <= budget) placedIdx = windowEndIdx;
+      if(placedIdx===-1) placedIdx = windowEndIdx; // nothing in the window has room — due date is a hard deadline even for a flexible item, so force it on anyway
+    }
     week[placedIdx].flexFits.push(item);
     week[placedIdx].used += mins;
   }
@@ -1241,18 +1254,68 @@ function bookingsForDate(dueDate, excludeId){
   return {items, used, budget, inWindow:false};
 }
 
-/* Confirms a capacity-forecast push suggestion: moves the item's real due
-   date forward one business day, tracked the same way a checklist
-   instance's Push button already tracks a backlog push (pushCount/
-   pushReason) — deficiencies had those fields since the original import
-   but no UI ever wrote to them. One item, one day, at a time; the
-   forecast recomputes fresh from the new dueDate on next render. */
+/* What's LITERALLY dated for a specific day — for the manual capacity
+   cascade tool (openCapacityCascadeModal) specifically, which is a
+   different question from bookingsForDate()'s forecast-aware view above.
+   The fixed-item cascade inside computeWeekSchedule() already excludes a
+   fixed item from a day's `fixedFits` the moment something else edges it
+   out of that day's budget in the forward-looking forecast (sorted
+   smallest-estimate-first, so a single oversized item can get excluded
+   even though its real dueDate is unambiguously this exact day) — correct
+   for that forecast's own purpose (projecting whether a day's existing
+   load already overflows before planning anything else), but wrong for a
+   tool whose whole point is "what's actually sitting on this day so I can
+   rebalance it": if Josh just explicitly set something's dueDate to this
+   day, it needs to show up here regardless of how the forecast's sort
+   would otherwise exclude it. So: a literal dueDate match for fixed items
+   (no cascade exclusion), plus the live computed placement for flexible
+   items (computeWeekSchedule() already decides that one, cascade logic
+   doesn't apply to it the same way). */
+function literalDayBookings(day){
+  const budget = state.dailyAllowanceMinutes || 480;
+  const openJosh = d => d.status!=='Done' && d.owner==='Josh' && isUnitActiveByLocation(d.location);
+  const fixedHere = state.defs.filter(d => openJosh(d) && d.dueType!=='flexible' && d.dueDate===day);
+  const row = computeWeekSchedule().find(w=>w.day===day);
+  const flexHere = row ? row.flexFits : [];
+  const items = [...fixedHere, ...flexHere];
+  const used = items.reduce((n,it)=>n+(it.estimatedMinutes||PLAN_DEFAULT_ESTIMATE), 0);
+  return {items, used, budget};
+}
+
+/* Confirms a capacity push — manual, one item/one day at a time, never
+   automatic (the system still never moves a fixed item on its own; this
+   is Josh choosing to). Tracked the same way a checklist instance's Push
+   button already tracks a backlog push (pushCount/pushReason) —
+   deficiencies had those fields since the original import but no UI ever
+   wrote to them.
+
+   FIXED items: moves the real dueDate forward one business day, same as
+   before this manual capacity-cascade tool existed (the Capacity
+   section's own long-standing Push button already did exactly this).
+
+   FLEXIBLE items have no separate "scheduled day" field — computeWeekSchedule()
+   picks one fresh on every render — so pushing one doesn't touch its real
+   dueDate (that's the deadline, not where it landed) and instead pins it
+   to toDay via plannedDate, the same "I'll actually do this on day X"
+   field Josh's own deferred-item scheduling already uses. computeWeekSchedule()
+   honors a valid pin (see its flexible-placement loop) ahead of its normal
+   least-loaded auto-placement, and the pin is automatically invalidated
+   the same way any plannedDate already is — if the item's own dueDate
+   later changes (see openEditDefModal/the quick-date-picker, both already
+   clear plannedDate whenever dueDate changes). The caller is responsible
+   for warning first if toDay would exceed the item's dueDate — this
+   function does not re-check that boundary itself. */
 async function pushDefToNextBusinessDay(defId, fromDay, toDay){
   const d = state.defs.find(x=>x.id===defId);
   if(!d) return;
   d.pushCount = (d.pushCount||0)+1;
-  d.pushReason = `capacity: bumped from ${fromDay} to ${toDay} — day was full`;
-  d.dueDate = toDay;
+  if(d.dueType==='flexible'){
+    d.pushReason = `capacity: manually scheduled for ${toDay} (was landing on ${fromDay}) — day was full`;
+    d.plannedDate = toDay;
+  } else {
+    d.pushReason = `capacity: bumped from ${fromDay} to ${toDay} — day was full`;
+    d.dueDate = toDay;
+  }
   await sset('defs', state.defs);
 }
 
