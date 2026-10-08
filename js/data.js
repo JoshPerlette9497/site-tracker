@@ -1194,7 +1194,12 @@ const WEEK_SCHEDULE_SORT_KEY = (a,b)=>
    looks at the forward business-day window starting today, so a Friday that
    passed without being marked reviewed simply stops being generated — there
    is no missed-task/backlog/overdue state for it to carry into the next
-   week, by construction, not by any extra rollover-suppression logic. */
+   week, by construction, not by any extra rollover-suppression logic.
+
+   Tagged Quick (not Substantial) — it's a reminder for Josh, not one of his
+   2 real daily items, so it never bumps a genuine task out of a Friday's
+   cap slots. Seeded into quickItems, the same exempt bucket a Quick
+   deficiency lands in. */
 function isFriday(dateISO){
   return new Date(dateISO+'T00:00:00').getDay()===5;
 }
@@ -1214,7 +1219,7 @@ function fridayReviewVirtualItem(dateISO){
   return {
     id: 'friday-review-'+dateISO, virtual: 'fridayReview',
     description: '14-Day Look-Ahead Review', location: '', owner: 'Josh',
-    dueDate: dateISO, dueType: 'fixed', effortTier: 'substantial', estimatedMinutes: 30,
+    dueDate: dateISO, dueType: 'fixed', effortTier: 'quick', estimatedMinutes: 10,
     priority: 'Medium', category: 'Construction', status: 'DO', deferCount: 0,
   };
 }
@@ -1232,10 +1237,10 @@ function computeJoshDayPlan(){
   const week = days.map(day => ({day, cap, countingItems:[], quickItems:[]}));
   const conflicts = [];
 
-  // ---- recurring Friday review: seeded first so it claims its cap slot
-  // before anything else is placed, same as any other fixed commitment ----
+  // ---- recurring Friday review: Quick, so it never competes with the 2
+  // real counting items for a cap slot ----
   days.forEach((day, idx) => {
-    if(isFriday(day) && !isFridayReviewDone(day)) week[idx].countingItems.push(fridayReviewVirtualItem(day));
+    if(isFriday(day) && !isFridayReviewDone(day)) week[idx].quickItems.push(fridayReviewVirtualItem(day));
   });
 
   // ---- fixed: always lands on its real due date ----
