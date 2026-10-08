@@ -443,6 +443,7 @@ async function loadAll(){
   await migratePhaseChecklistByPhaseSeed_v1();
   await migrateClearLegacyMasterChecklist_v1();
   await migrateChecklistGroupVersions_v1();
+  await migrateEffortTierAndDeferCount_v1();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -570,6 +571,39 @@ async function migrateDefDueType_v1(){
     if(!d.dueType){ d.dueType = 'fixed'; changed = true; }
   }
   if(changed) await sset('defs', state.defs);
+}
+
+/* Backfills the two fields the daily-item-cap rework needs on every
+   existing deficiency, one-time, gated the same way every other schema
+   change here is:
+   - effortTier ('quick'|'substantial'): only meaningful for Josh-owned
+     items (the cap only ever applies to those), derived from whatever
+     numeric estimatedMinutes a Josh item already had — >=30 becomes
+     'substantial', anything else (including no estimate at all) becomes
+     'quick'. estimatedMinutes itself then gets overwritten to the new
+     binary's flat mapping (10 for quick, 30 for substantial) so every
+     Josh item's stored estimate is consistent with the tier going
+     forward, per the explicit "map Quick/Substantial to a flat nominal
+     value, don't quietly keep granular minutes" decision. Trade/
+     Unassigned items are untouched — they never had this field and still
+     don't need it.
+   - deferCount: carries over whatever pushCount already recorded (the
+     old, narrower "manually pushed via the capacity tool" counter) as
+     the starting value for the new, broader "pushed/deferred to a later
+     date for any reason" counter. pushCount itself is left alone,
+     frozen at its historical value — nothing increments it anymore. */
+async function migrateEffortTierAndDeferCount_v1(){
+  const done = await sget('migrated_effort_tier_defer_count_v1', false);
+  if(done) return;
+  for(const d of state.defs){
+    if(d.owner==='Josh' && !d.effortTier){
+      d.effortTier = (d.estimatedMinutes||0)>=30 ? 'substantial' : 'quick';
+      d.estimatedMinutes = d.effortTier==='substantial' ? 30 : 10;
+    }
+    if(d.deferCount===undefined) d.deferCount = d.pushCount||0;
+  }
+  await sset('defs', state.defs);
+  await sset('migrated_effort_tier_defer_count_v1', true);
 }
 
 /* Computed, not stored — so editing owner/status through the existing
@@ -1002,29 +1036,29 @@ function relatedChecklistItems(groupItems, discoveryText){
 const PLAN_DEFAULT_ESTIMATE = 30;
 
 /* Builds today's suggested plan: Josh-owned deficiencies + phase-check groups
-   due today or overdue, sorted by due date then priority, greedily filled into
-   the daily time budget. Trade-owned deficiencies never count against the
-   budget — they're rounds follow-ups, not Josh's own task time. */
+   due today or overdue, sorted by due date then priority, capped at
+   JOSH_DAILY_ITEM_CAP "real" items per computeJoshDayPlan() below. Trade-owned
+   deficiencies never count against the cap — they're rounds follow-ups, not
+   Josh's own task time. */
 function buildSuggestedPlan(){
   const today = todayISO();
-  const todayResult = computeWeekSchedule()[0];
+  const {week, conflicts} = computeJoshDayPlan();
+  const todayResult = week[0];
 
-  // Josh's own workload for today — fixed items due/overdue today, plus any
-  // flexible item computeWeekSchedule() decided to place today. Both are
-  // shown identically (no fixed/flexible label anywhere), and dragging one
-  // in the queue below works the same for either.
+  // Josh's own workload for today — counting (fixed or "30+ minutes"
+  // flexible) items the cap engine placed today, plus quick items (always
+  // shown, never capped). Both are shown identically (no quick/substantial
+  // label in the queue itself — the defer-count badge and the Suggested
+  // Plan header's own count are where that distinction surfaces), and
+  // dragging one in the queue below works the same for either.
   const toScheduleItem = d => ({
     type:'def', due:d.dueDate, priority:d.priority||'Medium', category:d.category||'Construction',
     minutes: d.estimatedMinutes || PLAN_DEFAULT_ESTIMATE, ref:d
   });
-  const selectedDefs = [...todayResult.fixedFits, ...todayResult.flexFits].map(toScheduleItem);
-  // Only a fixed item's overflow is "didn't fit today" needing a manual
-  // reschedule — a flexible item that didn't land today simply got placed
-  // on a different day by the scheduler, there's nothing to defer.
-  const deferred = todayResult.fixedPushed.map(toScheduleItem);
+  const selectedDefs = [...todayResult.countingItems, ...todayResult.quickItems].map(toScheduleItem);
 
-  // Phase checks are never time-budgeted or deferrable — only Josh's own
-  // deficiencies compete for his daily allowance, since a phase check isn't a
+  // Phase checks are never capped or deferrable — only Josh's own
+  // deficiencies compete for his daily item cap, since a phase check isn't a
   // block of Josh's personal time the way his own deficiency is. They surface
   // by matching each active unit's Current Phase (set from round logging),
   // same as the Current Phase Checklist section in Unit Detail — not from a
@@ -1044,11 +1078,11 @@ function buildSuggestedPlan(){
 
   const selected = [...selectedDefs, ...phaseToday].sort((a,b)=>(a.due||'').localeCompare(b.due||''));
 
-  // Trade-owned deficiencies due today: never budgeted or ranked against Josh's
-  // own time, but still worth surfacing so today's rounds/follow-ups are visible.
+  // Trade-owned deficiencies due today: never capped or ranked against Josh's
+  // own items, but still worth surfacing so today's rounds/follow-ups are visible.
   const tradeToday = state.defs.filter(d=>d.status!=='Done' && d.owner==='Trade' && d.dueDate===today && isUnitActiveByLocation(d.location));
 
-  return {selected, deferred, tradeToday, used: todayResult.used, budget: todayResult.budget};
+  return {selected, conflicts, tradeToday, counted: todayResult.countingItems.length, cap: todayResult.cap};
 }
 
 /* Items parked as WAITING/DELEGATED (or any open item) whose follow-up date
@@ -1107,208 +1141,178 @@ const WEEK_SCHEDULE_SORT_KEY = (a,b)=>
   || (PRIORITY_ORDER[a.priority]??1)-(PRIORITY_ORDER[b.priority]??1)
   || (a.estimatedMinutes||PLAN_DEFAULT_ESTIMATE)-(b.estimatedMinutes||PLAN_DEFAULT_ESTIMATE);
 
-/* Single source of truth for Josh's own workload across the next 5
-   business days — both buildSuggestedPlan() (today only) and
-   buildCapacityForecast() (the whole week) derive from this, so a
-   flexible item can never show up as "today" in one view and a different
-   day in the other. Read-only: nothing here mutates state.
+/* Josh's hard daily item cap — REPLACES the old minutes-based
+   computeWeekSchedule() entirely for Josh-owned items (a deliberate
+   architecture decision, not an addition: minutes-based capacity was
+   retired for Josh's own items in favor of this count cap — see README
+   for the full reasoning). Trade items were never part of either system
+   and still aren't; this never applies to them.
 
-   FIXED items (dueType!=='flexible', the default — no behavior change
-   from before this field existed): anchored to their real dueDate exactly
-   like before. Whatever doesn't fit a day cascades forward as a push
-   candidate — the existing capacity-forecast behavior, untouched.
+   A "counting" item is Josh-owned, open, with a due date, and NOT tagged
+   effortTier:'quick' — fixed or flexible makes no difference. Quick items
+   (a verification, a follow-up email) are invisible to this cap entirely,
+   no matter how many land on a day. Never more than JOSH_DAILY_ITEM_CAP
+   counting items are treated as "fitting" a day by this engine's own
+   placement logic.
 
-   FLEXIBLE items: must land on/before dueDate, but which day is this
-   scheduler's call, not anchored to dueDate at all. Processed in
-   due-date-ascending order (the item with the least slack gets first pick
-   of capacity), each one placed on the LEAST-LOADED day in
-   [today, dueDate) that still has room for it — load-aware, not just
-   "first day with any space" — so pushing work off a full day spreads it
-   across whatever's actually most free in the rest of the window instead
-   of piling it all onto the very next day in sequence. The due date itself
-   is only used as a last resort: first if no earlier day has room, then
-   (if even the due date is full) forced on anyway, since dueDate is a hard
-   "must be done by," even for a flexible item. Un-finished flexible items need no separate roll-forward logic: this
-   whole thing recomputes fresh on every render, so a flexible item still
-   open tomorrow just gets re-scheduled fresh alongside everything else,
-   per Josh's spec for how rescheduling should work. Escalating a flexible
-   item once it's within 2 days of its dueDate likewise needs no special
-   code — due-date-ascending processing plus a shrinking window already
-   pushes it toward the front of the queue and the start of its window as
-   the deadline approaches. */
-function computeWeekSchedule(){
-  const budget = state.dailyAllowanceMinutes || 480;
+   FIXED counting items always land on their real dueDate, full stop —
+   this engine never moves a fixed item (same rule as always: the system
+   doesn't auto-move fixed commitments). If Josh manually puts a 3rd fixed
+   counting item on an already-capped day himself, that's visible (the day
+   shows over cap) but never prevented or silently relocated.
+
+   FLEXIBLE counting items: earliest-deadline-first (least slack gets
+   first pick), placed on the EARLIEST day in [today, dueDate] that still
+   has room under the cap. If NO day in the whole window has room, this is
+   a real conflict — unlike the old minutes model's last-resort "force it
+   on anyway," an unplaceable item is NOT crammed in or silently dropped;
+   it's returned separately in `conflicts` for the UI to flag plainly, so
+   Josh decides how to resolve it rather than the cap quietly breaking or
+   the deadline quietly slipping.
+
+   FLEXIBLE quick items are exempt and don't compete for a slot at all —
+   always placed on the earliest day in their own window (today, if the
+   window reaches that far), since there's no scarcity reason to delay
+   something that was never going to count against anything.
+
+   A manual plannedDate pin (the capacity-cascade push tool, or Josh's own
+   "I'll do this on day X" deferred-item scheduling) is honored ahead of
+   auto-placement for a counting flexible item, same precedent as the old
+   engine — invalidated the same way plannedDate always has been (the
+   item's own dueDate changing clears it). */
+const JOSH_DAILY_ITEM_CAP = 2;
+function computeJoshDayPlan(){
+  const cap = JOSH_DAILY_ITEM_CAP;
   const days = businessDaysForward(todayISO(), 5);
   const lastDay = days[days.length-1];
   const openJosh = d => d.status!=='Done' && d.owner==='Josh' && d.dueDate && isUnitActiveByLocation(d.location);
-
-  // ---- fixed: unchanged cascade-from-due-date ----
-  const fixedPool = state.defs.filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType!=='flexible');
   const dayIndexFor = (dueDate) => {
     for(let i=0; i<days.length; i++){ if(dueDate<=days[i]) return i; }
     return days.length-1;
   };
-  const fixedByDay = days.map(()=>[]);
-  for(const item of fixedPool) fixedByDay[dayIndexFor(item.dueDate)].push(item);
+  const week = days.map(day => ({day, cap, countingItems:[], quickItems:[]}));
+  const conflicts = [];
 
-  const week = days.map(day => ({day, budget, used:0, fixedFits:[], fixedPushed:[], fixedOverflow:[], flexFits:[]}));
-  let carry = [];
-  for(let i=0; i<days.length; i++){
-    const candidates = [...carry, ...fixedByDay[i]].sort(WEEK_SCHEDULE_SORT_KEY);
-    const fits = [], pushed = [];
-    let used = 0;
-    for(const item of candidates){
-      const mins = item.estimatedMinutes || PLAN_DEFAULT_ESTIMATE;
-      if(fits.length===0 || used+mins<=budget){ fits.push(item); used += mins; }
-      else pushed.push(item);
-    }
-    const isLastDay = i===days.length-1;
-    week[i].fixedFits = fits;
-    week[i].used = used;
-    week[i].fixedPushed = isLastDay ? [] : pushed;
-    week[i].fixedOverflow = isLastDay ? pushed : [];
-    carry = pushed;
+  // ---- fixed: always lands on its real due date ----
+  const fixedPool = state.defs.filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType!=='flexible');
+  for(const item of fixedPool){
+    const idx = dayIndexFor(item.dueDate);
+    if(item.effortTier==='quick') week[idx].quickItems.push(item);
+    else week[idx].countingItems.push(item);
   }
 
-  // ---- flexible: earliest-deadline-first, least-loaded-day-in-window ----
-  // (unless manually pinned — see plannedDate check below)
+  // ---- flexible: earliest-deadline-first, earliest-day-under-cap ----
   const flexPool = state.defs
     .filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType==='flexible')
     .sort(WEEK_SCHEDULE_SORT_KEY);
   for(const item of flexPool){
-    const mins = item.estimatedMinutes || PLAN_DEFAULT_ESTIMATE;
+    if(item.effortTier==='quick'){
+      week[0].quickItems.push(item); // exempt from the cap - nothing to ration, front-load to today
+      continue;
+    }
     const windowEndIdx = dayIndexFor(item.dueDate);
     let placedIdx = -1;
-    // Manual push (capacity cascade, js/render.js openCapacityCascadeModal)
-    // pins a flexible item to a specific day via plannedDate — the same
-    // field Josh's own "I'll actually do this Thursday" deferred-item
-    // scheduling already uses, just read here too now. Only honored while
-    // it's still a real choice: within today..dueDate and inside this
-    // window: a stale pin (dueDate moved past it, or it's fallen outside
-    // the window) is silently ignored and the item falls back to normal
-    // auto-placement, same as every other invalidation of this field.
     if(item.plannedDate){
       const pinnedIdx = days.indexOf(item.plannedDate);
       if(pinnedIdx!==-1 && pinnedIdx<=windowEndIdx) placedIdx = pinnedIdx;
     }
     if(placedIdx===-1){
-      // Prefer a day strictly before the deadline (front-loading), picking
-      // whichever such day currently has the LEAST committed load — not
-      // just the first one with room — so pushing work off a busy day
-      // spreads it across what's actually most free, instead of piling
-      // everything onto the very next day in sequence. Ties go to the
-      // earliest such day (front-loading as the tiebreaker, not the
-      // primary key) since the loop only replaces the current best on a
-      // strictly lower load.
-      let bestUsed = Infinity;
-      for(let i=0; i<windowEndIdx; i++){
-        if(week[i].used + mins <= budget && week[i].used < bestUsed){
-          bestUsed = week[i].used; placedIdx = i;
-        }
+      for(let i=0; i<=windowEndIdx; i++){
+        if(week[i].countingItems.length < cap){ placedIdx = i; break; }
       }
-      if(placedIdx===-1 && week[windowEndIdx].used + mins <= budget) placedIdx = windowEndIdx;
-      if(placedIdx===-1) placedIdx = windowEndIdx; // nothing in the window has room — due date is a hard deadline even for a flexible item, so force it on anyway
     }
-    week[placedIdx].flexFits.push(item);
-    week[placedIdx].used += mins;
+    if(placedIdx===-1){ conflicts.push(item); continue; } // no day in the window has room - a real conflict, not forced on anyway
+    week[placedIdx].countingItems.push(item);
   }
 
-  return week;
+  return {week, conflicts};
 }
 
-/* Thin wrapper over computeWeekSchedule() for the Capacity UI: fixed and
-   flexible items placed on a day are shown together (display never
-   distinguishes them, per spec) but only fixed overflow gets a manual
-   Push/Keep suggestion — a flexible item that doesn't fit reschedules
-   itself automatically on next render, nothing for Josh to confirm. */
-function buildCapacityForecast(){
-  return computeWeekSchedule().map(d => ({
-    day: d.day, budget: d.budget, used: d.used,
-    fits: [...d.fixedFits, ...d.flexFits],
-    pushed: d.fixedPushed,
-    overflow: d.fixedOverflow
+/* Thin wrapper over computeJoshDayPlan() for the Week Overload strip and
+   Capacity section — both just need, per day, the item lists and the
+   count against the cap, not the engine's own internal shape. */
+function buildJoshDayCounts(){
+  const {week} = computeJoshDayPlan();
+  return week.map(d => ({
+    day: d.day, cap: d.cap,
+    items: [...d.countingItems, ...d.quickItems],
+    countingCount: d.countingItems.length,
   }));
 }
 
 /* What's actually committed on a specific date, from Josh's perspective —
-   the single source of truth behind both the Add/Edit Deficiency overbook
-   check below and the live "what's booked" preview shown while picking a
-   due date. Prefers the real computed schedule (computeWeekSchedule())
-   when the date falls inside its 5-business-day window, since a flexible
-   item can land on a day other than its own dueDate — a plain dueDate
-   match would miss it. A date further out has no computed placement yet
-   (the window doesn't reach that far), so falls back to a literal dueDate
-   match there. excludeId leaves out the item currently being moved/created
-   so it never counts against itself. */
+   the single source of truth behind the live "what's booked" preview
+   shown while picking a due date. Prefers the real computed plan
+   (computeJoshDayPlan()) when the date falls inside its 5-business-day
+   window, since a flexible item can land on a day other than its own
+   dueDate — a plain dueDate match would miss it. A date further out has
+   no computed placement yet (the window doesn't reach that far), so
+   falls back to a literal dueDate match there. excludeId leaves out the
+   item currently being moved/created so it never counts against itself. */
 function bookingsForDate(dueDate, excludeId){
-  const budget = state.dailyAllowanceMinutes || 480;
-  if(!dueDate) return {items:[], used:0, budget, inWindow:false};
-  const row = computeWeekSchedule().find(w=>w.day===dueDate);
+  if(!dueDate) return {items:[], countingCount:0, cap:JOSH_DAILY_ITEM_CAP, inWindow:false};
+  const {week} = computeJoshDayPlan();
+  const row = week.find(w=>w.day===dueDate);
   if(row){
-    const items = [...row.fixedFits, ...row.flexFits].filter(it=>it.id!==excludeId);
-    const used = items.reduce((n,it)=>n+(it.estimatedMinutes||PLAN_DEFAULT_ESTIMATE), 0);
-    return {items, used, budget, inWindow:true};
+    const items = [...row.countingItems, ...row.quickItems].filter(it=>it.id!==excludeId);
+    const countingCount = row.countingItems.filter(it=>it.id!==excludeId).length;
+    return {items, countingCount, cap:row.cap, inWindow:true};
   }
   const items = state.defs.filter(d=>d.id!==excludeId && d.owner==='Josh' && d.dueDate===dueDate && d.status!=='Done');
-  const used = items.reduce((n,it)=>n+(it.estimatedMinutes||PLAN_DEFAULT_ESTIMATE), 0);
-  return {items, used, budget, inWindow:false};
+  const countingCount = items.filter(d=>d.effortTier!=='quick').length;
+  return {items, countingCount, cap:JOSH_DAILY_ITEM_CAP, inWindow:false};
 }
 
 /* What's LITERALLY dated for a specific day — for the manual capacity
-   cascade tool (openCapacityCascadeModal) specifically, which is a
-   different question from bookingsForDate()'s forecast-aware view above.
-   The fixed-item cascade inside computeWeekSchedule() already excludes a
-   fixed item from a day's `fixedFits` the moment something else edges it
-   out of that day's budget in the forward-looking forecast (sorted
-   smallest-estimate-first, so a single oversized item can get excluded
-   even though its real dueDate is unambiguously this exact day) — correct
-   for that forecast's own purpose (projecting whether a day's existing
-   load already overflows before planning anything else), but wrong for a
-   tool whose whole point is "what's actually sitting on this day so I can
-   rebalance it": if Josh just explicitly set something's dueDate to this
-   day, it needs to show up here regardless of how the forecast's sort
-   would otherwise exclude it. So: a literal dueDate match for fixed items
-   (no cascade exclusion), plus the live computed placement for flexible
-   items (computeWeekSchedule() already decides that one, cascade logic
-   doesn't apply to it the same way). */
+   cascade tool (openCapacityCascadeModal) specifically, a different
+   question from bookingsForDate()'s forecast-aware view above. The fixed
+   cascade in the old minutes engine used to exclude an oversized fixed
+   item from a day's count the moment the forecast's own sort decided
+   something else should have that slot — wrong for a tool whose whole
+   point is "what's actually sitting on this day so I can rebalance it."
+   The new count-based engine above doesn't have that exclusion problem
+   for fixed items (a fixed item always lands on its own day, full stop,
+   never excluded) — this still does a literal dueDate match for fixed
+   items rather than trusting the engine's own bucket, purely to stay
+   robust to the engine being read fresh each call; flexible items still
+   need the engine's own computed placement (computeJoshDayPlan() already
+   decides that one). */
 function literalDayBookings(day){
-  const budget = state.dailyAllowanceMinutes || 480;
+  const cap = JOSH_DAILY_ITEM_CAP;
   const openJosh = d => d.status!=='Done' && d.owner==='Josh' && isUnitActiveByLocation(d.location);
   const fixedHere = state.defs.filter(d => openJosh(d) && d.dueType!=='flexible' && d.dueDate===day);
-  const row = computeWeekSchedule().find(w=>w.day===day);
-  const flexHere = row ? row.flexFits : [];
+  const {week} = computeJoshDayPlan();
+  const row = week.find(w=>w.day===day);
+  const flexHere = row ? [...row.countingItems, ...row.quickItems].filter(it=>it.dueType==='flexible') : [];
   const items = [...fixedHere, ...flexHere];
-  const used = items.reduce((n,it)=>n+(it.estimatedMinutes||PLAN_DEFAULT_ESTIMATE), 0);
-  return {items, used, budget};
+  const countingCount = items.filter(it=>it.effortTier!=='quick').length;
+  return {items, countingCount, cap};
 }
 
 /* Confirms a capacity push — manual, one item/one day at a time, never
    automatic (the system still never moves a fixed item on its own; this
-   is Josh choosing to). Tracked the same way a checklist instance's Push
-   button already tracks a backlog push (pushCount/pushReason) —
-   deficiencies had those fields since the original import but no UI ever
-   wrote to them.
+   is Josh choosing to). Also the single increment point for deferCount
+   (see js/render.js's other increment sites for the rest) — a push is
+   always a defer, whichever item type it is.
 
    FIXED items: moves the real dueDate forward one business day, same as
    before this manual capacity-cascade tool existed (the Capacity
    section's own long-standing Push button already did exactly this).
 
-   FLEXIBLE items have no separate "scheduled day" field — computeWeekSchedule()
-   picks one fresh on every render — so pushing one doesn't touch its real
-   dueDate (that's the deadline, not where it landed) and instead pins it
-   to toDay via plannedDate, the same "I'll actually do this on day X"
-   field Josh's own deferred-item scheduling already uses. computeWeekSchedule()
-   honors a valid pin (see its flexible-placement loop) ahead of its normal
-   least-loaded auto-placement, and the pin is automatically invalidated
-   the same way any plannedDate already is — if the item's own dueDate
-   later changes (see openEditDefModal/the quick-date-picker, both already
-   clear plannedDate whenever dueDate changes). The caller is responsible
-   for warning first if toDay would exceed the item's dueDate — this
-   function does not re-check that boundary itself. */
+   FLEXIBLE items have no separate "scheduled day" field —
+   computeJoshDayPlan() picks one fresh on every render — so pushing one
+   doesn't touch its real dueDate (that's the deadline, not where it
+   landed) and instead pins it to toDay via plannedDate, the same "I'll
+   actually do this on day X" field Josh's own deferred-item scheduling
+   already uses. computeJoshDayPlan() honors a valid pin ahead of its
+   normal auto-placement, invalidated the same way any plannedDate always
+   is (the item's own dueDate changing clears it). The caller is
+   responsible for warning first if toDay would exceed the item's dueDate
+   — this function does not re-check that boundary itself. */
 async function pushDefToNextBusinessDay(defId, fromDay, toDay){
   const d = state.defs.find(x=>x.id===defId);
   if(!d) return;
-  d.pushCount = (d.pushCount||0)+1;
+  d.deferCount = (d.deferCount||0)+1;
   if(d.dueType==='flexible'){
     d.pushReason = `capacity: manually scheduled for ${toDay} (was landing on ${fromDay}) — day was full`;
     d.plannedDate = toDay;
@@ -1350,14 +1354,24 @@ async function splitDefIntoSubtasks(defId, subtasks){
   const parent = state.defs.find(x=>x.id===defId);
   if(!parent || !subtasks.length) return [];
   const suggested = suggestSubtaskDueDates(parent.dueDate, subtasks.length);
-  const created = subtasks.map((st,i) => ({
-    id: uid(), location: parent.location, description: st.text,
-    owner: parent.owner, dueDate: st.dueDate || suggested[i], dueType: 'fixed', priority: parent.priority,
-    category: parent.category, estimatedMinutes: st.minutes || null,
-    status: 'DO', pushCount: 0, pushReason: '', createdDate: todayISO(),
-    verifier: null, followUpDate: null, startedAt: null, notes: [],
-    parentId: parent.id
-  }));
+  // Subtasks inherit the parent's owner, so only a Josh-owned parent's
+  // subtasks get the Quick/Substantial effort tier (mirroring the same
+  // owner-gating the Add/Edit modals use) — everything else falls back to
+  // whatever free-form minutes it was given (Trade subtasks never had an
+  // estimate picker to begin with, so st.minutes is just null for them).
+  const created = subtasks.map((st,i) => {
+    const effortTier = parent.owner==='Josh' ? (st.effortTier||'quick') : undefined;
+    return {
+      id: uid(), location: parent.location, description: st.text,
+      owner: parent.owner, dueDate: st.dueDate || suggested[i], dueType: 'fixed', priority: parent.priority,
+      category: parent.category,
+      estimatedMinutes: effortTier ? (effortTier==='substantial'?30:10) : (st.minutes || null),
+      effortTier,
+      status: 'DO', pushCount: 0, deferCount: 0, pushReason: '', createdDate: todayISO(),
+      verifier: null, followUpDate: null, startedAt: null, notes: [],
+      parentId: parent.id
+    };
+  });
   state.defs.push(...created);
   parent.status = 'Done';
   parent.notes = parent.notes || [];
@@ -1393,6 +1407,7 @@ function resolveScheduleTask(id){
 async function setPlannedDate(taskId, date){
   const info = resolveScheduleTask(taskId);
   if(!info) return;
+  if(date && info.kind==='def') info.ref.deferCount = (info.ref.deferCount||0)+1;
   info.ref.plannedDate = date;
   if(info.kind==='def') await sset('defs', state.defs);
   else await sset('groupInstances', state.groupInstances);
