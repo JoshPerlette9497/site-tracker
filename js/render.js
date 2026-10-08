@@ -30,7 +30,7 @@ function nowSection(orderedPlan){
   let inner;
   if(top){
     inner = top.type==='def'
-      ? cardForDef(top.ref, dueStatus(top.ref.dueDate, top.ref.status))
+      ? cardForPlanDef(top.ref)
       : planPhaseCard(top);
   } else {
     const fu = followUpsDue()[0];
@@ -75,7 +75,7 @@ function renderBrief(){
     html += `<div class="empty">Nothing of yours due or overdue today.</div>`;
   } else {
     html += `<div id="planScheduleList">` + orderedPlan.map(item => draggableScheduleItem(item, item.type==='def'
-      ? cardForDef(item.ref, dueStatus(item.ref.dueDate, item.ref.status))
+      ? cardForPlanDef(item.ref)
       : planPhaseCard(item)
     )).join('') + `</div>`;
   }
@@ -526,13 +526,15 @@ function wireCapacityActions(){
    is hidden — they never count toward the cap, so there's never a reason
    to push one off an over-cap day. */
 function capacityCascadeRowHtml(item, day){
+  const isVirtual = !!item.virtual;
   const isFixed = item.dueType!=='flexible';
   const pinned = !isFixed && item.plannedDate===day;
   const isQuick = item.effortTier==='quick';
+  const kindLabel = isVirtual ? 'Recurring' : (isFixed?'Fixed':'Flexible');
   return `<div class="card" data-cascadeid="${item.id}">
     <div class="item-name" style="font-size:13px;">${escapeHtml(item.description)}</div>
-    <div class="item-meta" style="margin-top:2px;">${escapeHtml(item.location||'—')} · ${isQuick?'Quick':'30+ min'} · ${isFixed?'Fixed':'Flexible'}${pinned?' · 📌 pinned here':''}${deferTag(item)}</div>
-    ${isQuick ? '' : `<div class="row" style="margin-top:8px; gap:6px;">
+    <div class="item-meta" style="margin-top:2px;">${escapeHtml(item.location||'—')} · ${isQuick?'Quick':'30+ min'} · ${kindLabel}${pinned?' · 📌 pinned here':''}${deferTag(item)}</div>
+    ${(isQuick || isVirtual) ? '' : `<div class="row" style="margin-top:8px; gap:6px;">
       <button class="btn small ghost cascade-push" data-cascadeid="${item.id}" style="flex:1;">Push to next business day</button>
       ${pinned ? `<button class="btn small ghost cascade-unpin" data-cascadeid="${item.id}">Unpin</button>` : ''}
     </div>`}
@@ -666,6 +668,32 @@ function cardForDef(d, st){
       <button class="btn small done-btn defact-done">Mark Done</button>
     </div>
   </div>`;
+}
+
+/* The recurring Friday 14-Day Look-Ahead Review (see fridayReviewVirtualItem()
+   in data.js) is never a real deficiency — no edit modal, no push, just a
+   one-click way to mark it done for the day, which is also what makes it
+   stop occupying a cap slot (computeJoshDayPlan() stops generating it once
+   that Friday is in fridayReviewCompletions). */
+function fridayReviewCard(item){
+  return `<div class="card today friday-review-card">
+    <div class="row">
+      <div>
+        <div class="item-name">${escapeHtml(item.description)}</div>
+        <div class="item-meta">Recurring — every Friday</div>
+      </div>
+      <span class="stamp today">Today</span>
+    </div>
+    <div class="row" style="margin-top:10px; gap:6px;">
+      <button class="btn small done-btn friday-review-done" data-frdate="${item.dueDate}">Mark Reviewed</button>
+    </div>
+  </div>`;
+}
+/* Suggested Plan / Now section render either a real deficiency or the
+   recurring Friday review through this one switch, so both call sites stay
+   in sync rather than duplicating the check. */
+function cardForPlanDef(d){
+  return d.virtual==='fridayReview' ? fridayReviewCard(d) : cardForDef(d, dueStatus(d.dueDate, d.status));
 }
 
 /* Append-only notes log, newest first. ts is either a full ISO datetime
@@ -943,6 +971,12 @@ function wireCardActions(){
     e.stopPropagation();
     const id = e.target.closest('[data-def]').dataset.def;
     await markDefStarted(id);
+    render();
+  });
+  document.querySelectorAll('.friday-review-done').forEach(b=>b.onclick=async(e)=>{
+    e.stopPropagation();
+    await markFridayReviewDone(e.target.closest('[data-frdate]').dataset.frdate);
+    showToast('Marked reviewed.');
     render();
   });
   document.querySelectorAll('.def-card').forEach(card=>card.onclick=(e)=>{

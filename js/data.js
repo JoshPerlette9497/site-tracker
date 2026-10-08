@@ -358,7 +358,7 @@ const DEFAULT_MASTER = [
 ];
 
 /* ---------- state ---------- */
-let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[], checklistVersions:[], qcInspections:[] };
+let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[], checklistVersions:[], qcInspections:[], fridayReviewCompletions:[] };
 let activeTab = 'brief';
 let selectedScheduleUnit = null;
 let selectedLogDate = null;
@@ -407,6 +407,7 @@ async function loadAll(){
   state.defs = await sget('defs', []);
   state.schedule = await sget('schedule', []);
   state.planOrder = await sget('planOrder', []);
+  state.fridayReviewCompletions = await sget('fridayReviewCompletions', []);
   state.safetyWalkthroughs = await sget('safetyWalkthroughs', []);
   state.lastBackup = await sget('lastBackup', null);
   state.logHistory = await sget('logHistory', null);
@@ -1180,6 +1181,44 @@ const WEEK_SCHEDULE_SORT_KEY = (a,b)=>
    auto-placement for a counting flexible item, same precedent as the old
    engine — invalidated the same way plannedDate always has been (the
    item's own dueDate changing clears it). */
+/* ---------- recurring Friday commitment (14-Day Look-Ahead Review) ----------
+   A standing personal planning block, every Friday, no specific time — not a
+   real deficiency at all (no row in state.defs), so there's nothing to edit,
+   push, or have a dueDate changed on. Computed fresh every time
+   computeJoshDayPlan() runs, the same "derived, not stored" pattern as
+   dueStatus()/unifiedTaskStatus()/phase checks — the ONLY persisted state is
+   which Fridays Josh has actually marked reviewed (fridayReviewCompletions,
+   an array of ISO dates), so it can disappear once done.
+
+   This is also why it never "carries over": computeJoshDayPlan() only ever
+   looks at the forward business-day window starting today, so a Friday that
+   passed without being marked reviewed simply stops being generated — there
+   is no missed-task/backlog/overdue state for it to carry into the next
+   week, by construction, not by any extra rollover-suppression logic. */
+function isFriday(dateISO){
+  return new Date(dateISO+'T00:00:00').getDay()===5;
+}
+function isFridayReviewDone(dateISO){
+  return state.fridayReviewCompletions.includes(dateISO);
+}
+async function markFridayReviewDone(dateISO){
+  if(isFridayReviewDone(dateISO)) return;
+  state.fridayReviewCompletions.push(dateISO);
+  await sset('fridayReviewCompletions', state.fridayReviewCompletions);
+}
+/* Shaped enough like a deficiency (description/owner/dueDate/effortTier/
+   priority/category) to render through the existing card/row/tag helpers
+   unchanged — `virtual:'fridayReview'` is the one flag everything else
+   (edit-on-click, the cascade's push button) checks to leave it alone. */
+function fridayReviewVirtualItem(dateISO){
+  return {
+    id: 'friday-review-'+dateISO, virtual: 'fridayReview',
+    description: '14-Day Look-Ahead Review', location: '', owner: 'Josh',
+    dueDate: dateISO, dueType: 'fixed', effortTier: 'substantial', estimatedMinutes: 30,
+    priority: 'Medium', category: 'Construction', status: 'DO', deferCount: 0,
+  };
+}
+
 const JOSH_DAILY_ITEM_CAP = 2;
 function computeJoshDayPlan(){
   const cap = JOSH_DAILY_ITEM_CAP;
@@ -1192,6 +1231,12 @@ function computeJoshDayPlan(){
   };
   const week = days.map(day => ({day, cap, countingItems:[], quickItems:[]}));
   const conflicts = [];
+
+  // ---- recurring Friday review: seeded first so it claims its cap slot
+  // before anything else is placed, same as any other fixed commitment ----
+  days.forEach((day, idx) => {
+    if(isFriday(day) && !isFridayReviewDone(day)) week[idx].countingItems.push(fridayReviewVirtualItem(day));
+  });
 
   // ---- fixed: always lands on its real due date ----
   const fixedPool = state.defs.filter(d => openJosh(d) && d.dueDate<=lastDay && d.dueType!=='flexible');
@@ -1274,17 +1319,18 @@ function bookingsForDate(dueDate, excludeId){
    for fixed items (a fixed item always lands on its own day, full stop,
    never excluded) — this still does a literal dueDate match for fixed
    items rather than trusting the engine's own bucket, purely to stay
-   robust to the engine being read fresh each call; flexible items still
-   need the engine's own computed placement (computeJoshDayPlan() already
-   decides that one). */
+   robust to the engine being read fresh each call; flexible items and the
+   recurring Friday review (never a real def, so a literal dueDate match
+   can't find it) still need the engine's own computed placement
+   (computeJoshDayPlan() already decides those). */
 function literalDayBookings(day){
   const cap = JOSH_DAILY_ITEM_CAP;
   const openJosh = d => d.status!=='Done' && d.owner==='Josh' && isUnitActiveByLocation(d.location);
   const fixedHere = state.defs.filter(d => openJosh(d) && d.dueType!=='flexible' && d.dueDate===day);
   const {week} = computeJoshDayPlan();
   const row = week.find(w=>w.day===day);
-  const flexHere = row ? [...row.countingItems, ...row.quickItems].filter(it=>it.dueType==='flexible') : [];
-  const items = [...fixedHere, ...flexHere];
+  const otherHere = row ? [...row.countingItems, ...row.quickItems].filter(it=>it.dueType==='flexible' || it.virtual) : [];
+  const items = [...fixedHere, ...otherHere];
   const countingCount = items.filter(it=>it.effortTier!=='quick').length;
   return {items, countingCount, cap};
 }
