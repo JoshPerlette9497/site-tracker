@@ -483,6 +483,7 @@ function weekOverloadStrip(){
           </div>`;
         }
       }
+      html += `<button class="btn small ghost week-strip-manage" data-manageday="${day.day}" style="width:100%; margin-top:8px;">Manage / Push Items</button>`;
       html += `</div>`;
     }
   }
@@ -493,6 +494,10 @@ function wireWeekOverloadStrip(){
     const day = el.dataset.stripday;
     expandedWeekStripDay = expandedWeekStripDay===day ? null : day;
     render();
+  });
+  document.querySelectorAll('.week-strip-manage').forEach(btn=>btn.onclick=(e)=>{
+    e.stopPropagation();
+    openCapacityCascadeModal(btn.dataset.manageday);
   });
 }
 
@@ -510,7 +515,8 @@ function capacitySection(){
       <div class="row">
         <div class="item-name">${fmtDate(day.day)}</div>
         <span class="stamp ${over?'overdue':'done'}">${day.used}/${day.budget}m</span>
-      </div>`;
+      </div>
+      <button class="btn small ghost capacity-manage-day" data-manageday="${day.day}" style="width:100%; margin-top:6px;">Manage Day</button>`;
     if(toSuggest.length){
       const nextDay = nextBusinessDay(day.day);
       html += `<div class="item-meta" style="margin-top:6px;">Won't fit — suggest pushing to ${fmtDate(nextDay)}:</div>`;
@@ -530,6 +536,7 @@ function capacitySection(){
   return html;
 }
 function wireCapacityActions(){
+  document.querySelectorAll('.capacity-manage-day').forEach(btn=>btn.onclick=()=>openCapacityCascadeModal(btn.dataset.manageday));
   document.querySelectorAll('.capacity-push').forEach(b=>b.onclick=async(e)=>{
     const row = e.target.closest('[data-capacity-def]');
     const doPush = async()=>{
