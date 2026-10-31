@@ -138,6 +138,7 @@ async function ensureSiteKey(){
   setHeader();
   await loadAll();
   render();
+  startChatSafeSync();
 })();
 
 if('serviceWorker' in navigator){
