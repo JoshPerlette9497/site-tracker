@@ -10,16 +10,82 @@ const DEFAULT_UNITS = [
   {id:uid(), name:'Juniper B20', project:'Juniper', active:true, btLocation:'Juniper B20', currentPhase:'', crntTrade:'', ctEnd:null, nextTrade:'', lastWalkDate:null, riskOverride:null},
 ];
 
-/* Current Phase options for Log Round come from the actual synced schedule
-   data (state.schedule[].subject) instead of a separate hardcoded list, so
-   they can't drift out of sync with what Buildertrend/Outlook actually says.
-   extraValue keeps a unit's already-set phase in the list even if it no
+/* Original source for Current Phase options, kept only as the fallback for
+   when phaseSequence (below) hasn't been seeded yet - derived from the
+   actual synced schedule data (state.schedule[].subject), alphabetical
+   since there's no real build-order information in schedule data to sort
+   by. extraValue keeps a unit's already-set phase in the list even if it no
    longer appears in the schedule, so it doesn't silently disappear. */
 function scheduleSubjectOptions(extraValue){
   const set = new Set();
   for(const s of state.schedule){ if(s.subject) set.add(s.subject.trim()); }
   if(extraValue) set.add(extraValue.trim());
   return [...set].filter(Boolean).sort((a,b)=>a.localeCompare(b));
+}
+
+/* The real source for every phase dropdown (Log Round's Current Phase and
+   Next Trade) - a flat, ordered list Josh keeps current via a
+   Supabase-connected Claude chat (state.phaseSequence), not anything
+   derived from schedule data or sorted alphabetically. Falls back to
+   scheduleSubjectOptions() whole-sale when phaseSequence hasn't been
+   seeded yet (or was cleared to empty), so nothing breaks before Josh sets
+   it up.
+
+   One normalization on top of phaseSequence's own order: wherever a
+   "Pre-X" entry and its matching "X" entry both exist (case-insensitive),
+   "Pre-X" is moved to sit immediately before "X" in the rendered list,
+   regardless of where each one actually falls in phaseSequence - so Josh
+   (or chat) doesn't have to carefully interleave every Pre-/real pair by
+   hand for it to display correctly. A "Pre-X" with no matching "X" in the
+   list is left exactly where it is.
+
+   extraValue (a unit's already-set phase) is appended if it isn't already
+   in the list, same safety net scheduleSubjectOptions() already had - an
+   old value that's since been removed from phaseSequence must still show
+   up correctly wherever it's already saved (see currentPhaseChecklistGroup
+   below for the matching side of that same guarantee). */
+function phaseSequenceOptions(extraValue){
+  const seqRaw = Array.isArray(state.phaseSequence) ? state.phaseSequence : [];
+  const cleaned = seqRaw.filter(p => typeof p==='string' && p.trim());
+  if(cleaned.length===0) return scheduleSubjectOptions(extraValue);
+
+  // De-dupe case-insensitively, keeping first-seen casing and position.
+  const seen = new Set();
+  const list = [];
+  for(const raw of cleaned){
+    const p = raw.trim();
+    const lower = p.toLowerCase();
+    if(seen.has(lower)) continue;
+    seen.add(lower);
+    list.push(p);
+  }
+
+  // Pull every "Pre-X" that has a matching "X" out of the list, keyed by
+  // the base name it belongs before; everything else (including a
+  // "Pre-X" with no match) stays in `rest`, in its original order.
+  const lowerSet = new Set(list.map(p=>p.toLowerCase()));
+  const preForBase = new Map();
+  const rest = [];
+  for(const p of list){
+    const lower = p.toLowerCase();
+    if(lower.startsWith('pre-')){
+      const baseName = lower.slice(4);
+      if(lowerSet.has(baseName)){ preForBase.set(baseName, p); continue; }
+    }
+    rest.push(p);
+  }
+  const result = [];
+  for(const p of rest){
+    const lower = p.toLowerCase();
+    if(preForBase.has(lower)) result.push(preForBase.get(lower));
+    result.push(p);
+  }
+
+  if(extraValue){
+    const trimmed = extraValue.trim();
+    if(trimmed && !result.some(p=>p.toLowerCase()===trimmed.toLowerCase())) result.push(trimmed);
+  }
+  return result;
 }
 
 function businessDaysBetween(fromISO, toISO){
@@ -358,7 +424,7 @@ const DEFAULT_MASTER = [
 ];
 
 /* ---------- state ---------- */
-let state = { units:[], master:[], instances:[], defs:[], schedule:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[], checklistVersions:[], qcInspections:[], fridayReviewCompletions:[] };
+let state = { units:[], master:[], instances:[], defs:[], schedule:[], phaseSequence:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[], checklistVersions:[], qcInspections:[], fridayReviewCompletions:[] };
 let activeTab = 'brief';
 let selectedScheduleUnit = null;
 let selectedLogDate = null;
@@ -406,6 +472,11 @@ async function loadAll(){
   state.instances = await sget('instances', null);
   state.defs = await sget('defs', []);
   state.schedule = await sget('schedule', []);
+  // The ordered master phase list every phase dropdown now draws from (see
+  // phaseSequenceOptions() below) - edited from a Supabase-connected Claude
+  // chat, not from any UI in this app, so there's nothing here to save it
+  // back out except picking it up like any other chat-safe-writes key.
+  state.phaseSequence = await sget('phaseSequence', []);
   state.planOrder = await sget('planOrder', []);
   state.fridayReviewCompletions = await sget('fridayReviewCompletions', []);
   state.safetyWalkthroughs = await sget('safetyWalkthroughs', []);
@@ -847,11 +918,11 @@ function groupDueDate(unitId, group){
    so that phase's checklist can be surfaced directly instead of making
    Josh hunt for it in the full group list. */
 function currentPhaseChecklistGroup(u){
-  if(!u.currentPhase) return null;
-  const phase = u.currentPhase.toLowerCase();
+  if(!u.currentPhase || !u.currentPhase.trim()) return null;
+  const phase = u.currentPhase.trim().toLowerCase();
   return state.checklistGroups.find(g => {
-    if(!g.matchPhase) return false;
-    const mp = g.matchPhase.toLowerCase();
+    if(!g.matchPhase || !g.matchPhase.trim()) return false;
+    const mp = g.matchPhase.trim().toLowerCase();
     return g.exactMatch ? phase===mp : phase.includes(mp);
   }) || null;
 }
