@@ -1804,14 +1804,14 @@ function openEditWalkModal(unitId){
 
 function openRoundModal(unitId){
   const u = state.units.find(x=>x.id===unitId);
-  const phaseOpts = scheduleSubjectOptions(u.currentPhase).map(p=>`<option value="${escapeHtml(p)}" ${u.currentPhase===p?'selected':''}>${escapeHtml(p)}</option>`).join('');
-  const nextTradeOpts = scheduleSubjectOptions(u.nextTrade).map(p=>`<option value="${escapeHtml(p)}" ${u.nextTrade===p?'selected':''}>${escapeHtml(p)}</option>`).join('');
+  const phaseOpts = phaseSequenceOptions(u.currentPhase).map(p=>`<option value="${escapeHtml(p)}" ${u.currentPhase===p?'selected':''}>${escapeHtml(p)}</option>`).join('');
+  const nextTradeOpts = phaseSequenceOptions(u.nextTrade).map(p=>`<option value="${escapeHtml(p)}" ${u.nextTrade===p?'selected':''}>${escapeHtml(p)}</option>`).join('');
   showModal(`
     <h2>Log Round — ${escapeHtml(u.name)}</h2>
     <div class="helptext" style="margin-bottom:6px;">Sets Last Walk Date to today and saves whatever you update below.</div>
     <label>Current Phase</label>
     <select id="rPhase"><option value="">—</option>${phaseOpts}</select>
-    ${phaseOpts?'':'<div class="helptext" style="margin-top:2px;">No schedule synced yet — import one on the Sync tab to populate this list.</div>'}
+    ${phaseOpts?'':'<div class="helptext" style="margin-top:2px;">No phase list set up yet, and no schedule synced either — import a schedule on the Sync tab, or set up the phase list via chat, to populate this.</div>'}
     <label>Trade End Date</label><input id="rCtEnd" type="date" value="${u.ctEnd||''}">
     <label>Next Trade</label>
     <select id="rNextTrade"><option value="">—</option>${nextTradeOpts}</select>
