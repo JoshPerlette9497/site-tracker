@@ -196,6 +196,28 @@ const TEMPLATES = {
   }
 };
 
+/* ============ QC TYPES ============
+   Each inspection has a type. Interior uses TEMPLATES above (unchanged).
+   Exterior and Frame Check have no checklist yet: add items to their rooms below when ready
+   (same [name, check, method] format; use the base:[] list for items every room should get). */
+const emptyRooms = src => Object.fromEntries(Object.entries(src).map(([k,v]) => [k, {label:v.label, prefix:v.prefix, items:[]}]));
+const TYPES = {
+  interior: { label:"Interior QC", short:"", base:TEMPLATES.base, rooms:TEMPLATES.rooms },
+  exterior: { label:"Exterior QC", short:"Exterior", base:[], numbered:false,
+    autoRooms:["front","rear","left","right"],
+    hint:"No checklist for this type yet. Use \"+ custom item\" to log what you find.",
+    rooms:{
+      front:{label:"Front elevation", prefix:"Front elevation", items:[]},
+      rear:{label:"Rear elevation", prefix:"Rear elevation", items:[]},
+      left:{label:"Left elevation", prefix:"Left elevation", items:[]},
+      right:{label:"Right elevation", prefix:"Right elevation", items:[]}
+    }},
+  frame: { label:"Frame Check QC", short:"FrameCheck", base:[],
+    hint:"No checklist for this type yet. Use \"+ custom item\" to log what you find.",
+    rooms:emptyRooms(TEMPLATES.rooms) }
+};
+const cfg = insp => TYPES[(insp && insp.type) || 'interior'] || TYPES.interior;
+
 /* ============ helpers ============ */
 const $ = s => document.querySelector(s);
 const app = $('#app');
@@ -284,14 +306,19 @@ function mkItem(key, [n, c, m], group) {
            status:'unchecked', defs:[] };
 }
 function nextRoomName(insp, type) {
-  const prefix = TEMPLATES.rooms[type].prefix;
+  const c = cfg(insp), prefix = c.rooms[type].prefix;
+  if (c.numbered === false) {
+    let n = 1, name = prefix;
+    while (insp.rooms.some(r => r.name === name)) name = prefix + ' ' + (++n);
+    return name;
+  }
   let n = insp.rooms.filter(r => r.type === type).length + 1;
   while (insp.rooms.some(r => r.name === prefix+' '+n)) n++;
   return prefix + ' ' + n;
 }
 function mkRoom(insp, type) {
-  const t = TEMPLATES.rooms[type];
-  const items = TEMPLATES.base.map(i => mkItem('base:'+i[0], i, 'base'))
+  const c = cfg(insp), t = c.rooms[type];
+  const items = c.base.map(i => mkItem('base:'+i[0], i, 'base'))
     .concat(t.items.map(i => mkItem(type+':'+i[0], i, 'room')));
   return { id:uid(), type, name:nextRoomName(insp, type), order:0, items };
 }
@@ -300,7 +327,8 @@ const findRoom = id => cur && cur.rooms.find(r => r.id === id);
 function findItem(id) { for (const r of cur.rooms) { const i = r.items.find(x => x.id === id); if (i) return {room:r, item:i}; } return null; }
 const newDef = () => ({id:uid(), note:'', trade:'', photoIds:[]});
 const itemPhotoIds = it => it.defs.flatMap(d => d.photoIds);
-function migrate(insp) {   // older data: one deficiency per item stored on the item itself
+function migrate(insp) {
+  if (!insp.type) insp.type = 'interior';   // older data: one deficiency per item stored on the item itself
   insp.rooms.forEach(r => r.items.forEach(it => {
     if (it.defs) return;
     it.defs = (it.status === 'def' || it.note || it.trade || (it.photoIds||[]).length) ? [{id:uid(), note:it.note||'', trade:it.trade||'', photoIds:it.photoIds||[]}] : [];
@@ -446,7 +474,7 @@ async function buildPDF(kind) {
   // header block
   doc.setFillColor(20, 30, 50); doc.rect(0, 0, W, 30, 'F');
   doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(18);
-  doc.text(full ? 'QC Inspection - Full Report' : 'QC Inspection - Deficiency List', M, 13);
+  doc.text(cfg(cur).label + (full ? ' - Full Report' : ' - Deficiency List'), M, 13);
   doc.setFont('helvetica','normal'); doc.setFontSize(11);
   doc.text(pdfClean(cur.site || ''), M, 21); doc.text(pdfClean('Unit: ' + (cur.unit || '')), M, 26.5);
   y = 36;
@@ -537,7 +565,7 @@ async function buildPDF(kind) {
     doc.text(pdfClean(`${cur.site || ''} ${cur.unit || ''} - ${cur.date}`.trim()), M, H-8);
     doc.text(`Page ${i} of ${n}`, W-M, H-8, {align:'right'});
   }
-  const base = `QC_${slug(cur.unit) || 'Unit'}_${cur.date}`;
+  const base = `QC_${slug(cur.unit) || 'Unit'}_${cur.date}` + (cfg(cur).short ? '_' + cfg(cur).short : '');
   return new File([doc.output('blob')], full ? base + '.pdf' : base + '_Deficiencies.pdf', {type:'application/pdf'});
 }
 async function exportPDF(kind) {
@@ -591,7 +619,7 @@ async function listHTML() {
   return `${topbar('', 'QC Inspections')}<div class="wrap">
   <button class="btn pri block" data-act="newInsp" style="margin-bottom:12px">+ New inspection</button>
   ${all.length ? all.map(i => { const s = inspStats(i); return `<div class="card tap" data-act="nav" data-to="#/i/${i.id}">
-      <h3>${esc(i.unit || '(no unit yet)')}</h3><div class="muted">${esc(i.site || 'No site')} · ${esc(i.date)} · ${esc(i.inspector || '')}</div>
+      <h3>${esc(i.unit || '(no unit yet)')}</h3><div class="pills" style="margin:2px 0 4px"><span class="pill">${esc(cfg(i).label)}</span></div><div class="muted">${esc(i.site || 'No site')} · ${esc(i.date)} · ${esc(i.inspector || '')}</div>
       <div class="pills"><span class="pill">${i.rooms.length} room${i.rooms.length===1?'':'s'}</span><span class="pill">${statLine(s)}</span>
       ${s.t && s.c===s.t ? '<span class="pill ok">Complete</span>' : ''}</div>${progBar(s)}</div>`; }).join('')
     : '<div class="empty">No inspections yet.<br>Tap “New inspection” to start a walkthrough.</div>'}
@@ -603,7 +631,7 @@ async function listHTML() {
 function inspHTML() {
   const s = inspStats(cur);
   const open = ui.detailsOpen === null ? !cur.unit : ui.detailsOpen;
-  return `${topbar('#/', cur.unit || 'New inspection', cur.site)}<div class="wrap">
+  return `${topbar('#/', cur.unit || 'New inspection', cfg(cur).label + (cur.site ? ' · ' + cur.site : ''))}<div class="wrap">
   <div class="card"><button class="btn block" data-act="toggleDetails">${open ? '▾' : '▸'} Inspection details</button>
    ${open ? `<div style="margin-top:10px">
     <label class="f">Site<input type="text" data-scope="insp" data-f="site" value="${esc(cur.site)}" autocomplete="off"></label>
@@ -663,11 +691,11 @@ function sectionHTML(room, group, title) {
     ${col ? '' : shown.map(itemHTML).join('') + (hidden ? `<div class="muted" style="margin:0 0 10px">${hidden} passed item${hidden===1?'':'s'} hidden</div>` : '')}`;
 }
 function roomHTML(room) {
-  const s = stats(room.items), idx = cur.rooms.indexOf(room), t = TEMPLATES.rooms[room.type] || {};
-  const sections = (t.items && t.items.length ? sectionHTML(room, 'room', esc(t.label || 'Room-specific')+' items') : '')
+  const s = stats(room.items), idx = cur.rooms.indexOf(room), t = cfg(cur).rooms[room.type] || {};
+  const sections = (room.items.some(i => i.group === 'room') ? sectionHTML(room, 'room', esc(t.label || 'Room-specific')+' items') : '')
     + sectionHTML(room, 'base', 'Base items (every room)');
   return `${topbar('#/i/' + cur.id, room.name, statLine(s))}<div class="wrap">
-  ${t.hint ? `<div class="hint">${esc(t.hint)}</div>` : ''}
+  ${t.hint || cfg(cur).hint ? `<div class="hint">${esc(t.hint || cfg(cur).hint)}</div>` : ''}
   <label class="row" style="align-items:center;min-height:48px"><input type="checkbox" data-act="hidePassed" ${ui.hidePassed?'checked':''} style="width:26px;height:26px"> Hide passed items</label>
   ${sections}
   ${sectionHTML(room, 'custom', 'Custom items')}
@@ -708,16 +736,21 @@ const ACT = {
   closeModal: () => modal(''),
   pendShare: async () => { modal(''); const f = window._pend; try { await navigator.share({files:[f], title:f.name}); } catch (e) { if (e.name !== 'AbortError') downloadFile(f); } },
   pendDl: () => { modal(''); downloadFile(window._pend); },
-  async newInsp() {
+  newInsp: () => modal(`<h3>New inspection – choose type</h3><div class="grid" style="grid-template-columns:1fr">${Object.entries(TYPES).map(([k,v]) =>
+      `<button class="btn" data-act="makeInsp" data-type="${k}">${esc(v.label)}</button>`).join('')}</div>
+      <button class="btn block" data-act="closeModal" style="margin-top:10px">Cancel</button>`),
+  async makeInsp(t) {
+    modal('');
     const last = (await dbGetAll('inspections')).sort((a,b) => b.createdAt - a.createdAt)[0];
-    const i = {id:uid(), site:last?last.site:'', unit:'', date:today(), inspector:last?last.inspector:'', notes:'', rooms:[], createdAt:Date.now(), updatedAt:Date.now()};
+    const i = {id:uid(), site:last?last.site:'', unit:'', date:today(), inspector:last?last.inspector:'', notes:'', type:t.dataset.type, rooms:[], createdAt:Date.now(), updatedAt:Date.now()};
+    (cfg(i).autoRooms || []).forEach(k => i.rooms.push(mkRoom(i, k))); reorder(i);
     try { await dbPut('inspections', i); } catch (e) { return storageFail(e); }
     ui.detailsOpen = null; nav('#/i/' + i.id);
   },
   backupAll: () => exportBackup(), backupOne: () => exportBackup(cur.id),
   importPick: () => $('#imp').click(),
   toggleDetails: () => { ui.detailsOpen = !(ui.detailsOpen === null ? !cur.unit : ui.detailsOpen); render(true); },
-  addRoom: () => modal(`<h3>Add room</h3><div class="grid">${Object.entries(TEMPLATES.rooms).map(([k,v]) =>
+  addRoom: () => modal(`<h3>Add room</h3><div class="grid">${Object.entries(cfg(cur).rooms).map(([k,v]) =>
       `<button class="btn" data-act="makeRoom" data-type="${k}">${esc(v.label)}</button>`).join('')}</div>
       <button class="btn block" data-act="closeModal" style="margin-top:10px">Close</button>`),
   makeRoom: async t => {
