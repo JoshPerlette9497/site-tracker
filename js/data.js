@@ -291,9 +291,9 @@ const PHASE_CHECKLIST_SEED = [
     {id:uid(), text:'gas exterior stubs address labels', subgroup:'QC'},
     {id:uid(), text:'rough-in components undamaged and protected', subgroup:'QC'},
     {id:uid(), text:'rough-ins coordinate with future finishes (ie. OTR/hoodfan)', subgroup:'QC'},
-    {id:uid(), text:'electricians tuck-taped all wire penetrations through drywall in mechanical rooms, from the poly side (not the drywall side) — all other rough-in penetrations through mechanical rooms to receive 2-pound foam and thermal treatment', subgroup:'QC'},
-    {id:uid(), text:'HVAC cut drywall and poly as tightly as possible around ducting and plenums, to make it easier for Wescan to apply 2-pound foam to penetrations above the garage drop ceiling', subgroup:'QC'},
-    {id:uid(), text:'electrical wiring kept tight to the drop ceiling at panel locations and secured in place, to make smoke sealing easier', subgroup:'QC'},
+    {id:uid(), text:'all IPD drywall damage is fixed and/or tuck taped', subgroup:'QC'},
+    {id:uid(), text:'HVAC cuts IPD as tight to plenums as possible', subgroup:'QC'},
+    {id:uid(), text:'electricians secure drop ceiling wires', subgroup:'QC'},
   ]},
   {id:'pcg_exterior_roof_qc', name:'EXTERIOR/ROOF QC', matchPhase:'Boarding', exactMatch:true, items:[
     {id:uid(), text:'full siding pieces used in visible locations', subgroup:'QC'},
@@ -520,6 +520,8 @@ async function loadAll(){
   await migrateChecklistGroupVersions_v1();
   await migrateEffortTierAndDeferCount_v1();
   await migrateRoughInFoamSealingItems_v1();
+  await migrateRoughInFoamSealingReword_v1();
+  await migrateRemoveDuplicateIpdItem_v1();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -902,16 +904,22 @@ async function migrateRoughInFoamSealingItems_v1(){
   if(done) return;
   const g = state.checklistGroups.find(x=>x.id==='pcg_rough_in_qc') || state.checklistGroups.find(x=>x.name==='ROUGH-IN QC');
   if(!g){ await sset('migrated_rough_in_foam_sealing_items_v1', true); return; }
-  const newTexts = [
-    'electricians tuck-taped all wire penetrations through drywall in mechanical rooms, from the poly side (not the drywall side) — all other rough-in penetrations through mechanical rooms to receive 2-pound foam and thermal treatment',
-    'HVAC cut drywall and poly as tightly as possible around ducting and plenums, to make it easier for Wescan to apply 2-pound foam to penetrations above the garage drop ceiling',
-    'electrical wiring kept tight to the drop ceiling at panel locations and secured in place, to make smoke sealing easier',
+  // Each entry's `old` wording is what this migration originally shipped;
+  // `new` is the shorter wording it was reworded to shortly after (see
+  // migrateRoughInFoamSealingReword_v1 below) - checked here too so a
+  // brand-new install, seeded straight from the already-reworded
+  // PHASE_CHECKLIST_SEED, doesn't get a duplicate "old" item added here
+  // only to be renamed on top of the one the seed already provided.
+  const items = [
+    { old: 'electricians tuck-taped all wire penetrations through drywall in mechanical rooms, from the poly side (not the drywall side) — all other rough-in penetrations through mechanical rooms to receive 2-pound foam and thermal treatment', new: 'all IPD drywall damage is fixed and/or tuck taped' },
+    { old: 'HVAC cut drywall and poly as tightly as possible around ducting and plenums, to make it easier for Wescan to apply 2-pound foam to penetrations above the garage drop ceiling', new: 'HVAC cuts IPD as tight to plenums as possible' },
+    { old: 'electrical wiring kept tight to the drop ceiling at panel locations and secured in place, to make smoke sealing easier', new: 'electricians secure drop ceiling wires' },
   ];
   const existingTexts = new Set(g.items.map(it=>it.text));
   const added = [];
-  for(const text of newTexts){
-    if(existingTexts.has(text)) continue;
-    const newItem = {id:uid(), text, subgroup:'QC'};
+  for(const {old, new: newText} of items){
+    if(existingTexts.has(old) || existingTexts.has(newText)) continue;
+    const newItem = {id:uid(), text: old, subgroup:'QC'};
     g.items.push(newItem);
     added.push(newItem);
   }
@@ -927,6 +935,79 @@ async function migrateRoughInFoamSealingItems_v1(){
     await sset('checklistVersions', state.checklistVersions);
   }
   await sset('migrated_rough_in_foam_sealing_items_v1', true);
+}
+
+/* Reword-only follow-up to the migration above - the original wording
+   shipped before Josh asked for it to be shortened to match this
+   checklist's terse style. Matches each item by its OLD exact text and
+   swaps in the new wording (same technical content, just shorter); does
+   nothing to an item whose text has already been hand-edited away from
+   the original (so this can never clobber a later manual edit), and does
+   nothing at all if the items were never added in the first place (e.g. a
+   fresh install seeded straight from the new wording). Still goes through
+   the same version-bump + checklistVersions history bookkeeping a wording
+   change made via the QC-discovery MERGED path already gets. */
+async function migrateRoughInFoamSealingReword_v1(){
+  const done = await sget('migrated_rough_in_foam_sealing_reword_v1', false);
+  if(done) return;
+  const g = state.checklistGroups.find(x=>x.id==='pcg_rough_in_qc') || state.checklistGroups.find(x=>x.name==='ROUGH-IN QC');
+  if(!g){ await sset('migrated_rough_in_foam_sealing_reword_v1', true); return; }
+  const renames = [
+    { old: 'electricians tuck-taped all wire penetrations through drywall in mechanical rooms, from the poly side (not the drywall side) — all other rough-in penetrations through mechanical rooms to receive 2-pound foam and thermal treatment', new: 'all IPD drywall damage is fixed and/or tuck taped' },
+    { old: 'HVAC cut drywall and poly as tightly as possible around ducting and plenums, to make it easier for Wescan to apply 2-pound foam to penetrations above the garage drop ceiling', new: 'HVAC cuts IPD as tight to plenums as possible' },
+    { old: 'electrical wiring kept tight to the drop ceiling at panel locations and secured in place, to make smoke sealing easier', new: 'electricians secure drop ceiling wires' },
+  ];
+  const renamed = [];
+  for(const {old, new: newText} of renames){
+    const item = g.items.find(it=>it.text===old);
+    if(!item) continue;
+    item.text = newText;
+    renamed.push({old, new: newText});
+  }
+  if(renamed.length){
+    g.version = (g.version||1) + 1;
+    state.checklistVersions.push({
+      id: uid(), groupId: g.id, versionNumber: g.version, createdDate: todayISO(),
+      items: g.items.map(it=>({...it})),
+      reason: `Reworded ${renamed.length} rough-in item${renamed.length===1?'':'s'} for brevity: ${renamed.map(r=>`"${r.old}" → "${r.new}"`).join(' · ')}`,
+      originatingInspectionId: null
+    });
+    await sset('checklistGroups', state.checklistGroups);
+    await sset('checklistVersions', state.checklistVersions);
+  }
+  await sset('migrated_rough_in_foam_sealing_reword_v1', true);
+}
+
+/* Removes a specific near-duplicate: Josh added "IPD damage is fixed
+   and/or tuck taped" directly via a connected chat (a real test of
+   chat-safe writes), believing at the time it would only apply to one
+   unit - checklistGroups has no per-unit scoping at all, so it was
+   already live on every unit's ROUGH-IN QC. He then asked for the item
+   below (migrateRoughInFoamSealingReword_v1 above) to cover the same
+   ground with the exact wording he wanted, so this one-time cleanup
+   removes the exact earlier text rather than leaving both sitting in the
+   list together. Matches by exact text only, so it can never remove
+   anything Josh has since hand-edited into something else. */
+async function migrateRemoveDuplicateIpdItem_v1(){
+  const done = await sget('migrated_remove_duplicate_ipd_item_v1', false);
+  if(done) return;
+  const g = state.checklistGroups.find(x=>x.id==='pcg_rough_in_qc') || state.checklistGroups.find(x=>x.name==='ROUGH-IN QC');
+  if(!g){ await sset('migrated_remove_duplicate_ipd_item_v1', true); return; }
+  const dupeText = 'IPD damage is fixed and/or tuck taped';
+  const before = g.items.length;
+  g.items = g.items.filter(it=>it.text!==dupeText);
+  if(g.items.length < before){
+    g.version = (g.version||1) + 1;
+    state.checklistVersions.push({
+      id: uid(), groupId: g.id, versionNumber: g.version, createdDate: todayISO(),
+      items: g.items.map(it=>({...it})),
+      reason: `Removed "${dupeText}" - a manually-added near-duplicate of the reworded rough-in item`,
+      originatingInspectionId: null
+    });
+    await sset('checklistGroups', state.checklistGroups);
+    await sset('checklistVersions', state.checklistVersions);
+  }
+  await sset('migrated_remove_duplicate_ipd_item_v1', true);
 }
 
 /* Loads Josh's "By Phase" rebuild (22 broad QC groups, replacing the empty
