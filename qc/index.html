@@ -198,8 +198,41 @@ const TEMPLATES = {
 
 /* ============ QC TYPES ============
    Each inspection has a type. Interior uses TEMPLATES above (unchanged).
-   Exterior and Frame Check have no checklist yet: add items to their rooms below when ready
-   (same [name, check, method] format; use the base:[] list for items every room should get). */
+   Exterior has no checklist yet (items are added as custom items while walking).
+   Frame Check items are defined just below. Item format is [name, check, method]; the last two are optional. */
+/* Frame Check: every-room items are each room's "base" items (interior rooms get all six; Garage skips interior door RO's;
+   Exterior, Roof/Attic and Deck get none). Add items by appending [name] to a room's items. */
+const FRAME_EVERY = [
+  ["Walls/ceilings straight/plumb"],
+  ["Exterior door and window RO's square and operational"],
+  ["Floors have no deflection or squeaks"],
+  ["Insulation stops installed and secured"],
+  ["Backing allows insulation/poly/drywall installation"],
+  ["Interior door RO's to plan and accommodate casing"]
+];
+const FRAME_GARAGE_EVERY = FRAME_EVERY.filter(i => !/^Interior door/.test(i[0]));
+const FRAME_DRAINS = ["Joist layout in for plumbing drains"];
+const FRAME_TILE = ["Framing plumb/straight for tile locations"];
+const FRAME_FIXTURE_BACKING = ["Backing in for bathroom fixtures"];
+const fr = (label, items, base) => ({label, prefix:label, items, base: base === undefined ? FRAME_EVERY : base});
+const FRAME_ROOMS = {
+  exterior: fr("Exterior", [["Exterior plumb and aligned and backing in for all siding"], ["Fascia/soffit correct for roofing overhangs"]], []),
+  roof:     fr("Roof/Attic", [["Roof access cut out"]], []),
+  garage:   fr("Garage", [["Garage RO correct"], ["Garage ceiling and wall backing"], ["Garage structural components as per plan"],
+                          ["Garage-to-house door installed and shimmed properly for IPD"]], FRAME_GARAGE_EVERY),
+  deck:     fr("Deck", [["Deck structural components as per plan"]], []),
+  entry:    fr("Entry", []),
+  kitchen:  fr("Kitchen", [["Framing in for cabinet/appliance spacing"], FRAME_DRAINS, FRAME_TILE, ["Kitchen wall inset for fridge"]]),
+  living:   fr("Living/Dining", []),
+  bedroom:  fr("Bedroom", []),
+  bathroom: fr("Bathroom", [FRAME_DRAINS, FRAME_TILE, ["Bathrooms fit tubs/showers as per wall assembly"], FRAME_FIXTURE_BACKING]),
+  powder:   fr("Powder Room", [FRAME_DRAINS, FRAME_FIXTURE_BACKING]),
+  laundry:  fr("Laundry", [FRAME_DRAINS, ["Laundry room fits machines"]]),
+  mech:     fr("Mechanical Room", [["Framed backing in for mechanical trades"], ["Mechanical room door installed and shimmed properly for IPD"]]),
+  stairs:   fr("Stairs", [["Stairs correct for finished layout"], ["Stair headroom to code"], ["Stair handrail/underside backing"],
+                          ["Basement stair blocking for foam insulation"]]),
+  basement: fr("Basement", [])
+};
 const emptyRooms = src => Object.fromEntries(Object.entries(src).map(([k,v]) => [k, {label:v.label, prefix:v.prefix, items:[]}]));
 const TYPES = {
   interior: { label:"Interior QC", short:"", base:TEMPLATES.base, rooms:TEMPLATES.rooms },
@@ -212,9 +245,7 @@ const TYPES = {
       left:{label:"Left elevation", prefix:"Left elevation", items:[]},
       right:{label:"Right elevation", prefix:"Right elevation", items:[]}
     }},
-  frame: { label:"Frame Check QC", short:"FrameCheck", base:[],
-    hint:"No checklist for this type yet. Use \"+ custom item\" to log what you find.",
-    rooms:emptyRooms(TEMPLATES.rooms) }
+  frame: { label:"Frame Check QC", short:"FrameCheck", base:[], rooms:FRAME_ROOMS }
 };
 const cfg = insp => TYPES[(insp && insp.type) || 'interior'] || TYPES.interior;
 
@@ -306,7 +337,7 @@ function mkItem(key, [n, c, m], group) {
            status:'unchecked', defs:[] };
 }
 function nextRoomName(insp, type) {
-  const c = cfg(insp), prefix = c.rooms[type].prefix;
+  const c = cfg(insp), prefix = (c.rooms[type] || {prefix:type}).prefix;
   if (c.numbered === false) {
     let n = 1, name = prefix;
     while (insp.rooms.some(r => r.name === name)) name = prefix + ' ' + (++n);
@@ -318,7 +349,7 @@ function nextRoomName(insp, type) {
 }
 function mkRoom(insp, type) {
   const c = cfg(insp), t = c.rooms[type];
-  const items = c.base.map(i => mkItem('base:'+i[0], i, 'base'))
+  const items = (t.base || c.base).map(i => mkItem('base:'+i[0], i, 'base'))
     .concat(t.items.map(i => mkItem(type+':'+i[0], i, 'room')));
   return { id:uid(), type, name:nextRoomName(insp, type), order:0, items };
 }
