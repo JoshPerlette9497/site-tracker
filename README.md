@@ -278,6 +278,17 @@ Verified: 20 pure unit tests on the ordering/pairing/matching logic (fallback be
 
 **Test plan:** load the app, confirm the Log Round dropdowns show the phases in the order set in `phaseSequence` (not alphabetical), with any "Pre-X" sitting right before its "X"; edit `phaseSequence` from a connected chat and confirm the dropdown picks it up without a manual reload; confirm a unit's already-set phase still displays correctly even if it's no longer in the list.
 
+## Added 3 items to the ROUGH-IN QC checklist
+Josh asked for 3 foam-sealing/smoke-sealing checks to be added to the Rough-In phase checklist (about tuck-taping wire penetrations in mechanical rooms from the poly side, HVAC cutting drywall/poly tight around ducting for Wescan's 2-pound foam, and keeping electrical wiring tight/secured at drop-ceiling panel locations for smoke sealing).
+
+Added as 3 new items on the existing `ROUGH-IN QC` checklist group, through a small one-time migration (`migrateRoughInFoamSealingItems_v1`, same "small patch" pattern this file already uses for incremental checklist content) rather than hand-editing the live database — this way the checklist's version history (QC History, per-unit) correctly records the addition with a reason, exactly like an item added through an in-field QC discovery would, and it's reflected in the app's own seed data for any future fresh install too, not just this one database.
+
+**Judgment call:** reworded Josh's wording slightly to match this checklist's existing terse, lowercase style (every other item here is a short phrase, not a full instructional sentence) — kept every technical detail intact (poly side vs. drywall side, 2-pound foam, Wescan, drop-ceiling panel locations) while trimming it to fit the list's voice. Flagging in case the fuller original wording is actually preferred for something this specific.
+
+One expected side effect, not a bug: any unit that had already fully checked off Rough-In QC under the old (16-item) list will now correctly show as incomplete (16/19) until the 3 new items are checked off too — since this is newly-required QC content, that's the intended behavior, not something to backfill around.
+
+Verified in a headless browser: the migration adds exactly the 3 new items, bumps the group's version by one, and records one new checklist-history entry naming all 3; running it again is a no-op (no duplicates); a unit previously complete under the old list correctly shows the 3 new items as not-yet-done; and all 3 render correctly on a unit's Current Phase Checklist once expanded.
+
 ## Safety walkthrough photo storage (one-time setup required)
 The daily Safety Walkthrough feature (Brief tab) uploads per-checklist-item
 photos to a Supabase Storage bucket named `hazard-photos` (`js/storage.js`:
