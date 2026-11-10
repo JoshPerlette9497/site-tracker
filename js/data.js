@@ -291,6 +291,9 @@ const PHASE_CHECKLIST_SEED = [
     {id:uid(), text:'gas exterior stubs address labels', subgroup:'QC'},
     {id:uid(), text:'rough-in components undamaged and protected', subgroup:'QC'},
     {id:uid(), text:'rough-ins coordinate with future finishes (ie. OTR/hoodfan)', subgroup:'QC'},
+    {id:uid(), text:'electricians tuck-taped all wire penetrations through drywall in mechanical rooms, from the poly side (not the drywall side) — all other rough-in penetrations through mechanical rooms to receive 2-pound foam and thermal treatment', subgroup:'QC'},
+    {id:uid(), text:'HVAC cut drywall and poly as tightly as possible around ducting and plenums, to make it easier for Wescan to apply 2-pound foam to penetrations above the garage drop ceiling', subgroup:'QC'},
+    {id:uid(), text:'electrical wiring kept tight to the drop ceiling at panel locations and secured in place, to make smoke sealing easier', subgroup:'QC'},
   ]},
   {id:'pcg_exterior_roof_qc', name:'EXTERIOR/ROOF QC', matchPhase:'Boarding', exactMatch:true, items:[
     {id:uid(), text:'full siding pieces used in visible locations', subgroup:'QC'},
@@ -516,6 +519,7 @@ async function loadAll(){
   await migrateClearLegacyMasterChecklist_v1();
   await migrateChecklistGroupVersions_v1();
   await migrateEffortTierAndDeferCount_v1();
+  await migrateRoughInFoamSealingItems_v1();
   if(state.instances === null){
     state.instances = [];
     for(const u of state.units){ if(u.active){ for(const m of state.master){ state.instances.push(makeInstance(u.id,m.id)); } } }
@@ -877,6 +881,52 @@ async function migrateChecklistGroupVersions_v1(){
     await sset('checklistVersions', state.checklistVersions);
   }
   await sset('migrated_checklist_group_versions_v1', true);
+}
+
+/* Small content patch to the already-shipped ROUGH-IN QC group (same
+   "small patch migration" pattern migratePhaseChecklistByPhaseSeed_v1's own
+   comment describes) - adds 3 foam/smoke-sealing checks Josh asked for
+   directly, without going through the in-field QC-discovery review flow
+   (finishQcInspection) those also feed into, since these aren't something
+   discovered during a round - they're just new permanent checklist content.
+   Still goes through the same "controlled checklist evolution" bookkeeping
+   that flow uses (version bump + a checklistVersions history entry), so
+   the QC History view for this group shows this addition same as any
+   other, and every past inspection's own frozen snapshot stays untouched.
+   Matched by group id, falling back to name match in case the id ever
+   changes; does nothing if the group isn't found, and skips re-adding any
+   item whose text is already present (belt-and-suspenders alongside the
+   migration flag itself). */
+async function migrateRoughInFoamSealingItems_v1(){
+  const done = await sget('migrated_rough_in_foam_sealing_items_v1', false);
+  if(done) return;
+  const g = state.checklistGroups.find(x=>x.id==='pcg_rough_in_qc') || state.checklistGroups.find(x=>x.name==='ROUGH-IN QC');
+  if(!g){ await sset('migrated_rough_in_foam_sealing_items_v1', true); return; }
+  const newTexts = [
+    'electricians tuck-taped all wire penetrations through drywall in mechanical rooms, from the poly side (not the drywall side) — all other rough-in penetrations through mechanical rooms to receive 2-pound foam and thermal treatment',
+    'HVAC cut drywall and poly as tightly as possible around ducting and plenums, to make it easier for Wescan to apply 2-pound foam to penetrations above the garage drop ceiling',
+    'electrical wiring kept tight to the drop ceiling at panel locations and secured in place, to make smoke sealing easier',
+  ];
+  const existingTexts = new Set(g.items.map(it=>it.text));
+  const added = [];
+  for(const text of newTexts){
+    if(existingTexts.has(text)) continue;
+    const newItem = {id:uid(), text, subgroup:'QC'};
+    g.items.push(newItem);
+    added.push(newItem);
+  }
+  if(added.length){
+    g.version = (g.version||1) + 1;
+    state.checklistVersions.push({
+      id: uid(), groupId: g.id, versionNumber: g.version, createdDate: todayISO(),
+      items: g.items.map(it=>({...it})),
+      reason: `Added ${added.length} rough-in foam/smoke-sealing item${added.length===1?'':'s'}: ${added.map(it=>it.text).join(' · ')}`,
+      originatingInspectionId: null
+    });
+    await sset('checklistGroups', state.checklistGroups);
+    await sset('checklistVersions', state.checklistVersions);
+  }
+  await sset('migrated_rough_in_foam_sealing_items_v1', true);
 }
 
 /* Loads Josh's "By Phase" rebuild (22 broad QC groups, replacing the empty
