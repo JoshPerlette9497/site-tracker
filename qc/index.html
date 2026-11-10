@@ -208,20 +208,28 @@ const FRAME_EVERY = [
   ["Floors have no deflection or squeaks"],
   ["Insulation stops installed and secured"],
   ["Backing allows insulation/poly/drywall installation"],
-  ["Interior door RO's to plan and accommodate casing"]
+  ["Interior door RO's to plan and accommodate casing"],
+  ["All 1\" air spaces insulated"]
 ];
-const FRAME_GARAGE_EVERY = FRAME_EVERY.filter(i => !/^Interior door/.test(i[0]));
+const FRAME_CEILING_BACKING = ["Install ceiling backing between joist blocks spaced greater than 24\" OC"];
+const FRAME_GARAGE_EVERY = FRAME_EVERY.filter(i => !/^Interior door|^All 1/.test(i[0]));
+const FRAME_CURBING = [["Concrete curbing flush with exterior wall framing is strapped so drywall doesn't touch the cold foundation (treat as frost wall if needed)"],
+                       ["Concrete curbing flush with a staggered shared wall: entire wall strapped out with 2x4s"]];
 const FRAME_DRAINS = ["Joist layout in for plumbing drains"];
-const FRAME_TILE = ["Framing plumb/straight for tile locations"];
+const FRAME_TILE = ["Walls where tile will be installed are plumb and straight (no bowing)"];
 const FRAME_FIXTURE_BACKING = ["Backing in for bathroom fixtures"];
-const fr = (label, items, base) => ({label, prefix:label, items, base: base === undefined ? FRAME_EVERY : base});
+const fr = (label, items, base) => ({label, prefix:label, items, base: base === undefined ? FRAME_EVERY.concat([FRAME_CEILING_BACKING]) : base});
 const FRAME_ROOMS = {
-  exterior: fr("Exterior", [["Exterior plumb and aligned and backing in for all siding"], ["Fascia/soffit correct for roofing overhangs"]], []),
-  roof:     fr("Roof/Attic", [["Roof access cut out"]], []),
+  exterior: fr("Exterior", [["Exterior plumb and aligned and backing in for all siding"], ["Fascia/soffit correct for roofing overhangs"],
+                            ["Side, front and back cantilevers sheeted and under 2 ft so they can be foamed as a hot box"],
+                            ["Provide drywall access hatches for upper units and potentially main-floor units where patio decks aren't accessible"]], []),
+  roof:     fr("Roof/Attic", [["Roof access cut out"]], [FRAME_CEILING_BACKING]),
   garage:   fr("Garage", [["Garage RO correct"], ["Garage ceiling and wall backing"], ["Garage structural components as per plan"],
-                          ["Garage-to-house door installed and shimmed properly for IPD"]], FRAME_GARAGE_EVERY),
-  deck:     fr("Deck", [["Deck structural components as per plan"]], []),
-  entry:    fr("Entry", []),
+                          ["Garage-to-house door installed and shimmed properly for IPD"],
+                          ["Use 2x6 joist blocks where blocking is required for east/west bowing so cantilevers aren't closed off"]],
+                          FRAME_GARAGE_EVERY.concat([FRAME_CEILING_BACKING])),
+  deck:     fr("Deck", [["Deck structural components as per plan"]], [FRAME_CEILING_BACKING]),
+  entry:    fr("Entry", FRAME_CURBING),
   kitchen:  fr("Kitchen", [["Framing in for cabinet/appliance spacing"], FRAME_DRAINS, FRAME_TILE, ["Kitchen wall inset for fridge"]]),
   living:   fr("Living/Dining", []),
   bedroom:  fr("Bedroom", []),
@@ -231,7 +239,7 @@ const FRAME_ROOMS = {
   mech:     fr("Mechanical Room", [["Framed backing in for mechanical trades"], ["Mechanical room door installed and shimmed properly for IPD"]]),
   stairs:   fr("Stairs", [["Stairs correct for finished layout"], ["Stair headroom to code"], ["Stair handrail/underside backing"],
                           ["Basement stair blocking for foam insulation"]]),
-  basement: fr("Basement", [])
+  basement: fr("Basement", FRAME_CURBING)
 };
 const emptyRooms = src => Object.fromEntries(Object.entries(src).map(([k,v]) => [k, {label:v.label, prefix:v.prefix, items:[]}]));
 const TYPES = {
