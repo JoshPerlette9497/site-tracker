@@ -1505,6 +1505,87 @@ function openQcInspectionDetailModal(inspectionId){
   document.getElementById('qcDetailBackBtn').onclick = ()=>openQcHistoryModal(insp.groupId, insp.unitId);
 }
 
+/* Playbook engine - Look-Ahead. One bucketed rule row; "late" (trigger
+   date already passed, due today instead) gets the same red "overdue"
+   treatment as an actual overdue deficiency so it reads consistently
+   with the rest of the app. */
+function renderPlaybookBucket(title, items){
+  let html = `<div class="section-title" style="margin-top:10px; font-size:14px;">${escapeHtml(title)}<span class="pill">${items.length}</span></div>`;
+  if(items.length===0){ html += `<div class="empty">Nothing here.</div>`; return html; }
+  for(const f of items){
+    const r = f.rule;
+    html += `<div class="card ${f.late?'overdue':''}">
+      <div class="item-name">${escapeHtml(r.text)}</div>
+      <div class="item-meta">${escapeHtml(r.phase)}${r.trade?' · '+escapeHtml(r.trade):''} · due ${fmtDate(f.dueDate)}${f.late?' · LATE':''}${r.cost?' · '+escapeHtml(r.cost)+' cost':''}</div>
+      ${r.hiddenBy?`<div class="item-meta">Covered by ${escapeHtml(r.hiddenBy)}</div>`:''}
+    </div>`;
+  }
+  return html;
+}
+
+/* Playbook engine - Look-Ahead section markup for a unit's real buckets,
+   plus the what-if "done in N days" preview input (wired up by
+   wireLookAheadSection below, after this HTML is in the DOM). The what-if
+   preview runs entirely client-side against a cloned unit object - nothing
+   is saved until Apply is clicked. */
+function renderLookAheadSection(u){
+  let html = `<div class="section-title">Look-Ahead</div>`;
+  if(!u.ctEnd){
+    html += `<div class="empty">Set a Trade End Date above to see what's coming up.</div>`;
+  } else {
+    const buckets = playbookBucketsForUnit(u);
+    if(!buckets){
+      html += `<div class="empty">Current phase "${escapeHtml(u.currentPhase||'—')}" isn't in the build sequence, so nothing can be projected yet.</div>`;
+    } else {
+      html += renderPlaybookBucket('Book now', buckets.bookNow);
+      html += renderPlaybookBucket("Check before it's covered", buckets.checkBeforeCovered);
+      html += renderPlaybookBucket('Coming up', buckets.comingUp);
+    }
+  }
+  html += `<div class="card" style="margin-top:10px;">
+    <div class="item-meta" style="margin-bottom:6px;">What if the current phase finishes in…</div>
+    <div class="row" style="gap:6px;">
+      <input id="laWhatIfDays" type="number" min="0" placeholder="days" style="width:80px;">
+      <button class="btn small ghost" id="laWhatIfPreview">Preview</button>
+      <button class="btn small" id="laWhatIfApply" style="display:none;">Apply</button>
+    </div>
+    <div id="laWhatIfResult" style="margin-top:8px;"></div>
+  </div>`;
+  return html;
+}
+
+function wireLookAheadSection(u, unitId){
+  const previewBtn = document.getElementById('laWhatIfPreview');
+  if(!previewBtn) return;
+  previewBtn.onclick = ()=>{
+    const n = parseInt(document.getElementById('laWhatIfDays').value, 10);
+    const resultEl = document.getElementById('laWhatIfResult');
+    const applyBtn = document.getElementById('laWhatIfApply');
+    if(isNaN(n) || n<0){ resultEl.innerHTML = `<div class="empty">Enter a number of days.</div>`; applyBtn.style.display='none'; return; }
+    const whatIfDate = addDays(todayISO(), n);
+    const buckets = playbookBucketsForUnit({...u, ctEnd: whatIfDate});
+    if(!buckets){
+      resultEl.innerHTML = `<div class="empty">Current phase isn't in the build sequence, so nothing can be projected.</div>`;
+      applyBtn.style.display = 'none';
+      return;
+    }
+    resultEl.innerHTML = `<div class="helptext" style="margin-bottom:6px;">If done ${fmtDate(whatIfDate)} — preview only, nothing saved yet:</div>`
+      + renderPlaybookBucket('Book now', buckets.bookNow)
+      + renderPlaybookBucket("Check before it's covered", buckets.checkBeforeCovered)
+      + renderPlaybookBucket('Coming up', buckets.comingUp);
+    applyBtn.style.display = '';
+    applyBtn.onclick = ()=>{
+      showConfirm(`Set ${u.name}'s Trade End Date to ${fmtDate(whatIfDate)}?`, async()=>{
+        u.ctEnd = whatIfDate;
+        await sset('units', state.units);
+        await runPlaybookEngine();
+        showToast('Trade End Date updated.');
+        openUnitDetail(unitId);
+      });
+    };
+  };
+}
+
 function openUnitDetail(unitId){
   const prevModal = document.querySelector('.modal');
   const prevScrollTop = prevModal ? prevModal.scrollTop : 0;
@@ -1533,6 +1614,7 @@ function openUnitDetail(unitId){
     </div>
     <button class="btn" id="logRoundBtn" style="width:100%; margin-top:10px;">Log Round</button>
   </div>`;
+  html += renderLookAheadSection(u);
   const history = state.roundHistory.filter(r=>r.unitId===unitId).slice().sort((a,b)=>b.date.localeCompare(a.date));
   html += `<div class="section-title">Round History<span class="pill">${history.length}</span></div>`;
   if(history.length===0){
@@ -1655,6 +1737,7 @@ function openUnitDetail(unitId){
     openUnitDetail(unitId);
   };
   document.getElementById('editWalkBtn').onclick = ()=>openEditWalkModal(unitId);
+  wireLookAheadSection(u, unitId);
   document.getElementById('unitArchiveBtn').onclick = ()=>{
     if(u.active){
       closeModal();
@@ -1858,6 +1941,7 @@ function openRoundModal(unitId){
     });
     await sset('roundHistory', state.roundHistory);
     delete selectedRoundHistoryId[unitId]; // jump the dropdown back to the just-logged (newest) round
+    await runPlaybookEngine(); // phase/ctEnd just changed - refresh Look-Ahead tasks for this unit
     closeModal();
     showToast('Round logged for ' + u.name);
     openUnitDetail(unitId);
@@ -2621,6 +2705,12 @@ function renderSync(){
   <textarea id="syncPaste" placeholder='[{"location":"Aurora B03","subject":"Roofing","finishDate":"2026-08-14"}]'></textarea>
   <button class="btn" id="syncImportBtn" style="margin-top:10px;">Import</button>
   <div class="divider"></div>
+  <div class="section-title">Playbook</div>
+  <div class="card">
+    <div class="helptext" style="margin-bottom:8px;">${state.playbook.length} rules drive each unit's Look-Ahead screen. Edit rules, phase durations and lookahead settings here.</div>
+    <button class="btn" id="openPlaybookEditorBtn" style="width:100%;">Open Playbook Editor</button>
+  </div>
+  <div class="divider"></div>
   <div class="section-title">Backup & Restore</div>
   <div class="card">
     <div class="helptext" style="margin-bottom:10px;">${lastBackupText}</div>
@@ -2648,6 +2738,7 @@ function renderSync(){
       showToast('Imported ' + mapped.length + ' schedule events.');
     }catch(e){ showToast('Could not parse JSON: ' + e.message); }
   };
+  document.getElementById('openPlaybookEditorBtn').onclick = openPlaybookEditorModal;
   document.getElementById('backupBtn').onclick = doBackup;
   document.getElementById('restoreBtn').onclick = doRestore;
   document.getElementById('changeKeyBtn').onclick = ()=>{
@@ -2709,5 +2800,224 @@ async function doRestore(){
       showToast('Restored. Data from ' + (data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'backup file') + '.');
     }catch(e){ showToast('Restore failed: ' + e.message); }
   });
+}
+
+/* ---------- Playbook editor (opened from the Sync tab) ---------- */
+
+/* Rules grouped by phase, in phaseSequence's own build order - any rule
+   phase that isn't (or no longer is) in phaseSequence sorts alphabetically
+   after everything that is, rather than disappearing. */
+function renderPlaybookEditorHtml(){
+  const seq = Array.isArray(state.phaseSequence) ? state.phaseSequence : [];
+  const rulesByPhase = new Map();
+  for(const r of state.playbook){
+    const key = r.phase || '—';
+    if(!rulesByPhase.has(key)) rulesByPhase.set(key, []);
+    rulesByPhase.get(key).push(r);
+  }
+  const orderedPhases = seq.filter(p=>rulesByPhase.has(p));
+  const extraPhases = [...rulesByPhase.keys()].filter(p=>!orderedPhases.includes(p)).sort();
+  const phasesInOrder = [...orderedPhases, ...extraPhases];
+
+  let html = `<h2>Playbook Editor</h2>
+    <div class="helptext" style="margin-bottom:10px;">Rules that drive each unit's Look-Ahead screen, grouped by phase in build order.</div>
+    <button class="btn" id="pbAddRuleBtn" style="width:100%; margin-bottom:10px;">+ Add Rule</button>`;
+  for(const phase of phasesInOrder){
+    html += `<div class="section-title" style="margin-top:10px;">${escapeHtml(phase)}</div>`;
+    for(const r of rulesByPhase.get(phase)){
+      html += `<div class="card" data-ruleid="${r.id}" style="${r.active?'':'opacity:0.55;'}">
+        <div class="item-name">${escapeHtml(r.text)}${r.active?'':' (inactive)'}</div>
+        <div class="item-meta">${escapeHtml(r.anchor)} ${r.offsetDays>=0?'+':''}${r.offsetDays}d · ${escapeHtml(r.type)}${r.trade?' · '+escapeHtml(r.trade):''} · ${escapeHtml(r.cost||'medium')} cost${r.gate?' · GATE':''}${r.needsInput?' · NEEDS INPUT':''}</div>
+        ${r.needsInput && r.inputNote ? `<div class="item-meta">${escapeHtml(r.inputNote)}</div>` : ''}
+        <div class="row" style="margin-top:8px; gap:6px;">
+          <button class="btn small ghost pb-edit">Edit</button>
+          <button class="btn small ghost pb-duplicate">Duplicate</button>
+          <button class="btn small ${r.active?'ghost':''} pb-toggle">${r.active?'Deactivate':'Activate'}</button>
+        </div>
+      </div>`;
+    }
+  }
+  html += `<div class="divider"></div>
+    <div class="section-title">Phase Durations</div>
+    <div class="helptext" style="margin-bottom:8px;">Days each build phase takes, used to project upcoming phases. Defaults to 3.</div>`;
+  for(const phase of playbookLinearPhases()){
+    html += `<div class="row" style="margin:4px;"><div style="flex:1;">${escapeHtml(phase)}</div><input type="number" min="0" class="pb-duration" data-phase="${escapeHtml(phase)}" value="${state.phaseDurations[phase]??3}" style="width:70px;"></div>`;
+  }
+  html += `<button class="btn small" id="pbSaveDurationsBtn" style="margin-top:8px;">Save Durations</button>
+    <div class="divider"></div>
+    <div class="section-title">Playbook Settings</div>
+    <div class="row" style="margin:4px;"><div style="flex:1;">Lookahead days</div><input type="number" min="1" id="pbLookahead" value="${state.playbookSettings.lookaheadDays??14}" style="width:70px;"></div>
+    <div class="row" style="margin:4px;"><div style="flex:1;">Buffer days between phases</div><input type="number" min="0" id="pbBuffer" value="${state.playbookSettings.bufferDays??0}" style="width:70px;"></div>
+    <div class="row" style="margin:4px;"><div style="flex:1;">Winter months (comma-separated, 1-12)</div><input type="text" id="pbWinterMonths" value="${(state.playbookSettings.winterMonths||[]).join(',')}" style="width:110px;"></div>
+    <button class="btn small" id="pbSaveSettingsBtn" style="margin-top:8px;">Save Settings</button>`;
+  return html;
+}
+
+function wirePlaybookEditorModal(){
+  document.getElementById('pbAddRuleBtn').onclick = ()=>openPlaybookRuleModal(null);
+  document.querySelectorAll('[data-ruleid]').forEach(card=>{
+    const id = card.dataset.ruleid;
+    const editBtn = card.querySelector('.pb-edit');
+    const dupBtn = card.querySelector('.pb-duplicate');
+    const toggleBtn = card.querySelector('.pb-toggle');
+    if(editBtn) editBtn.onclick = ()=>openPlaybookRuleModal(id);
+    if(dupBtn) dupBtn.onclick = async()=>{
+      const r = state.playbook.find(x=>x.id===id);
+      if(!r) return;
+      // A fresh id so it's a distinct rule - dedup keys on (ruleId, unitId),
+      // so duplicating never clashes with tasks already fired from r itself.
+      state.playbook.push({...r, id: uid(), text: r.text + ' (copy)'});
+      await sset('playbook', state.playbook);
+      openPlaybookEditorModal();
+    };
+    if(toggleBtn) toggleBtn.onclick = async()=>{
+      const r = state.playbook.find(x=>x.id===id);
+      if(!r) return;
+      r.active = !r.active;
+      await sset('playbook', state.playbook);
+      await runPlaybookEngine(); // deactivating leaves existing tasks alone; activating can fire new ones
+      openPlaybookEditorModal();
+    };
+  });
+  document.getElementById('pbSaveDurationsBtn').onclick = async()=>{
+    document.querySelectorAll('.pb-duration').forEach(input=>{
+      const days = parseInt(input.value,10);
+      if(!isNaN(days) && days>=0) state.phaseDurations[input.dataset.phase] = days;
+    });
+    await sset('phaseDurations', state.phaseDurations);
+    await runPlaybookEngine();
+    showToast('Phase durations saved.');
+    openPlaybookEditorModal();
+  };
+  document.getElementById('pbSaveSettingsBtn').onclick = async()=>{
+    const lookaheadDays = parseInt(document.getElementById('pbLookahead').value,10);
+    const bufferDays = parseInt(document.getElementById('pbBuffer').value,10);
+    const winterMonths = document.getElementById('pbWinterMonths').value.split(',').map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n) && n>=1 && n<=12);
+    state.playbookSettings = {
+      lookaheadDays: (!isNaN(lookaheadDays) && lookaheadDays>=1) ? lookaheadDays : 14,
+      bufferDays: (!isNaN(bufferDays) && bufferDays>=0) ? bufferDays : 0,
+      winterMonths: winterMonths.length ? winterMonths : [11,12,1,2,3]
+    };
+    await sset('playbookSettings', state.playbookSettings);
+    await runPlaybookEngine();
+    showToast('Playbook settings saved.');
+    openPlaybookEditorModal();
+  };
+}
+
+function openPlaybookEditorModal(){
+  showModal(renderPlaybookEditorHtml());
+  wirePlaybookEditorModal();
+}
+
+/* Add/Edit a single playbook rule. Re-opens the editor list on save so
+   it reads as one screen with a form on top, matching how Log Round
+   returns to Unit Detail after saving. */
+function openPlaybookRuleModal(ruleId){
+  const existing = ruleId ? state.playbook.find(r=>r.id===ruleId) : null;
+  const r = existing || {id:null, phase:'', anchor:'start', offsetDays:0, type:'check', text:'', trade:'', hiddenBy:null, cost:'medium', season:'all', projects:['all'], gate:false, chain:'', needsInput:false, inputNote:'', active:true};
+  const phaseOpts = (Array.isArray(state.phaseSequence)?state.phaseSequence:[]).map(p=>`<option value="${escapeHtml(p)}"></option>`).join('');
+  const projectNames = [...new Set(state.units.map(u=>u.project).filter(Boolean))];
+
+  showModal(`
+    <h2>${existing?'Edit Rule':'Add Rule'}</h2>
+    <label>Phase (must match a phaseSequence entry)</label>
+    <input id="prPhase" list="prPhaseList" value="${escapeHtml(r.phase)}">
+    <datalist id="prPhaseList">${phaseOpts}</datalist>
+    <div class="field-row">
+      <div><label>Anchor</label>
+        <select id="prAnchor">
+          <option value="start" ${r.anchor==='start'?'selected':''}>Start of phase</option>
+          <option value="end" ${r.anchor==='end'?'selected':''}>End of phase</option>
+        </select>
+      </div>
+      <div><label>Offset Days (negative = before)</label><input id="prOffset" type="number" value="${r.offsetDays}"></div>
+    </div>
+    <label>Rule Text</label><textarea id="prText" style="min-height:60px;">${escapeHtml(r.text)}</textarea>
+    <div class="field-row">
+      <div><label>Type</label>
+        <select id="prType">${['check','book','verify','gate','standard','remind'].map(t=>`<option value="${t}" ${r.type===t?'selected':''}>${t}</option>`).join('')}</select>
+      </div>
+      <div><label>Cost</label>
+        <select id="prCost">${['low','medium','high'].map(c=>`<option value="${c}" ${r.cost===c?'selected':''}>${c}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div><label>Trade</label><input id="prTrade" value="${escapeHtml(r.trade||'')}"></div>
+      <div><label>Season</label>
+        <select id="prSeason">${['all','winter','summer'].map(s=>`<option value="${s}" ${r.season===s?'selected':''}>${s}</option>`).join('')}</select>
+      </div>
+    </div>
+    <label>Hidden By (what covers this up — leave blank if nothing does)</label>
+    <input id="prHiddenBy" value="${escapeHtml(r.hiddenBy||'')}">
+    <label>Chain (optional link id, e.g. roof-to-heat)</label>
+    <input id="prChain" value="${escapeHtml(r.chain||'')}">
+    <label>Projects</label>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin:4px;">
+      <label style="display:flex; align-items:center; gap:4px; text-transform:none; letter-spacing:normal; font-size:13px;">
+        <input type="checkbox" id="prProjAll" ${(!r.projects || r.projects.includes('all'))?'checked':''} style="width:16px; height:16px; margin:0;"> All
+      </label>
+      ${projectNames.map(p=>`<label style="display:flex; align-items:center; gap:4px; text-transform:none; letter-spacing:normal; font-size:13px;">
+        <input type="checkbox" class="prProjPick" value="${escapeHtml(p)}" ${(r.projects&&r.projects.includes(p))?'checked':''} style="width:16px; height:16px; margin:0;"> ${escapeHtml(p)}
+      </label>`).join('')}
+    </div>
+    <div style="display:flex; gap:14px; margin:10px 4px;">
+      <label style="display:flex; align-items:center; gap:4px; text-transform:none; letter-spacing:normal; font-size:13px;">
+        <input type="checkbox" id="prGate" ${r.gate?'checked':''} style="width:16px; height:16px; margin:0;"> Gate (hard go/no-go)
+      </label>
+      <label style="display:flex; align-items:center; gap:4px; text-transform:none; letter-spacing:normal; font-size:13px;">
+        <input type="checkbox" id="prNeedsInput" ${r.needsInput?'checked':''} style="width:16px; height:16px; margin:0;"> Needs Input
+      </label>
+    </div>
+    <div id="prInputNoteWrap" style="${r.needsInput?'':'display:none;'}">
+      <label>Input Note (what Josh still needs to fill in)</label>
+      <input id="prInputNote" value="${escapeHtml(r.inputNote||'')}">
+    </div>
+    <div class="divider"></div>
+    <button class="btn" id="prSaveBtn" style="width:100%;">${existing?'Save Rule':'Add Rule'}</button>
+  `);
+  document.getElementById('prNeedsInput').onchange = (e)=>{
+    document.getElementById('prInputNoteWrap').style.display = e.target.checked ? '' : 'none';
+  };
+  document.getElementById('prProjAll').onchange = (e)=>{
+    if(e.target.checked) document.querySelectorAll('.prProjPick').forEach(cb=>cb.checked=false);
+  };
+  document.querySelectorAll('.prProjPick').forEach(cb=>cb.onchange=()=>{
+    if(cb.checked) document.getElementById('prProjAll').checked = false;
+  });
+  document.getElementById('prSaveBtn').onclick = async()=>{
+    const phase = document.getElementById('prPhase').value.trim();
+    const text = document.getElementById('prText').value.trim();
+    if(!phase || !text) return;
+    const projAll = document.getElementById('prProjAll').checked;
+    const pickedProjects = [...document.querySelectorAll('.prProjPick:checked')].map(cb=>cb.value);
+    const needsInput = document.getElementById('prNeedsInput').checked;
+    const updated = {
+      id: existing ? existing.id : uid(),
+      phase, anchor: document.getElementById('prAnchor').value,
+      offsetDays: parseInt(document.getElementById('prOffset').value,10) || 0,
+      type: document.getElementById('prType').value,
+      text,
+      trade: document.getElementById('prTrade').value.trim(),
+      hiddenBy: document.getElementById('prHiddenBy').value.trim() || null,
+      cost: document.getElementById('prCost').value,
+      season: document.getElementById('prSeason').value,
+      projects: (projAll || pickedProjects.length===0) ? ['all'] : pickedProjects,
+      gate: document.getElementById('prGate').checked,
+      chain: document.getElementById('prChain').value.trim() || undefined,
+      needsInput,
+      inputNote: needsInput ? document.getElementById('prInputNote').value.trim() : undefined,
+      active: existing ? existing.active : true
+    };
+    if(existing){
+      const idx = state.playbook.findIndex(x=>x.id===existing.id);
+      state.playbook[idx] = updated;
+    } else {
+      state.playbook.push(updated);
+    }
+    await sset('playbook', state.playbook);
+    await runPlaybookEngine();
+    openPlaybookEditorModal();
+  };
 }
 
