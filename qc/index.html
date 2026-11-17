@@ -90,6 +90,18 @@ h2{font-size:15px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)
 #toast span{flex:1}
 #toast button{min-height:44px;border-radius:8px;border:2px solid #fff;background:transparent;color:#fff;font-weight:700;padding:0 12px}
 #busy{position:fixed;inset:0;z-index:90;background:var(--overlay);display:none;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:20px}
+/* quick walk */
+.qbar{position:sticky;bottom:calc(8px + env(safe-area-inset-bottom));z-index:15;display:flex;gap:8px;padding:10px 0 0;margin-top:6px}
+.qbar .btn{min-height:76px;font-size:20px;flex:1;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.qbar .btn.note{flex:.55}
+.qitem{background:var(--card);border:2px solid var(--bd);border-left-width:8px;border-radius:12px;padding:10px;margin:0 0 10px}
+.qitem.safe{border-left-color:var(--def)}
+.qitem .qh{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.qitem .qh b{flex:1}
+.qitem textarea{min-height:76px;margin-top:0}
+.btn.on-safe{background:var(--def);border-color:var(--def);color:#fff}
+.qcount{font-size:28px;font-weight:800}
+.qsel{width:28px;height:28px}
 .empty{text-align:center;color:var(--mut);padding:30px 10px}
 .hint{background:var(--chip);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px}
 </style>
@@ -243,6 +255,7 @@ const FRAME_ROOMS = {
 };
 const emptyRooms = src => Object.fromEntries(Object.entries(src).map(([k,v]) => [k, {label:v.label, prefix:v.prefix, items:[]}]));
 const TYPES = {
+  quick: { label:"Quick Walk", short:"QuickWalk", base:[], rooms:{}, quick:true },
   interior: { label:"Interior QC", short:"", base:TEMPLATES.base, rooms:TEMPLATES.rooms },
   exterior: { label:"Exterior QC", short:"Exterior", base:[], numbered:false,
     autoRooms:["front","rear","left","right"],
@@ -268,7 +281,7 @@ const STATUS = {unchecked:'Unchecked', pass:'Pass', def:'Deficiency', na:'N/A'};
 
 let db = null, cur = null, curRoomId = null, screen = 'list';
 const photoCache = new Map();           // id -> {id,itemId,blob,url,createdAt}
-const ui = { hidePassed:false, collapsed:{}, detailsOpen:null };
+const ui = { hidePassed:false, collapsed:{}, detailsOpen:null, qSort:null, qSel:new Set(), qFocus:null };
 
 /* ============ toast / busy / modal ============ */
 let toastTimer;
@@ -367,7 +380,8 @@ function findItem(id) { for (const r of cur.rooms) { const i = r.items.find(x =>
 const newDef = () => ({id:uid(), note:'', trade:'', photoIds:[]});
 const itemPhotoIds = it => it.defs.flatMap(d => d.photoIds);
 function migrate(insp) {
-  if (!insp.type) insp.type = 'interior';   // older data: one deficiency per item stored on the item itself
+  if (!insp.type) insp.type = 'interior';
+  if (insp.type === 'quick' && !insp.quick) insp.quick = [];   // older data: one deficiency per item stored on the item itself
   insp.rooms.forEach(r => r.items.forEach(it => {
     if (it.defs) return;
     it.defs = (it.status === 'def' || it.note || it.trade || (it.photoIds||[]).length) ? [{id:uid(), note:it.note||'', trade:it.trade||'', photoIds:it.photoIds||[]}] : [];
@@ -413,8 +427,30 @@ async function resizeImage(blob, max=1600, q=0.75) {
   return {blob: out, w:c.width, h:c.height};
 }
 let pendingItemId = null, pendingDefId = null;
+let pendingQuick = null;          // 'new' or a quick item id
+const newQuickItem = () => ({id:uid(), text:'', trade:'', safety:false, status:'untriaged', photoIds:[], createdAt:Date.now()});
+async function addQuickPhoto(file) {
+  const target = pendingQuick; pendingQuick = null;
+  busy('Saving photo…');
+  try {
+    const {blob} = await resizeImage(file);
+    let qi;
+    if (target === 'new') { qi = newQuickItem(); cur.quick.push(qi); } else { qi = cur.quick.find(x => x.id === target); if (!qi) return; }
+    const p = {id:uid(), inspectionId:cur.id, itemId:qi.id, blob, createdAt:Date.now()};
+    await dbPut('photos', p);
+    qi.photoIds.push(p.id);
+    photoCache.set(p.id, {...p, url:URL.createObjectURL(blob)});
+    if (target === 'new') ui.qFocus = qi.id;
+    await saveNow();
+    render(target !== 'new');
+    toast('Photo added', {action:'Save to Photos', onAction:()=>sharePhoto(p.id)});
+  } catch (err) { storageFail(err); }
+  finally { busy(''); }
+}
 $('#cam').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = '';
+  if (file && pendingQuick) return addQuickPhoto(file);
+  pendingQuick = null;
   if (!file || !pendingItemId) return;
   const found = findItem(pendingItemId); if (!found) return;
   const def = found.item.defs.find(d => d.id === pendingDefId); if (!def) return;
@@ -433,6 +469,11 @@ $('#cam').addEventListener('change', async e => {
 });
 function photoFile(id) {
   const p = photoCache.get(id), f = findItem(p.itemId);
+  if (!f && cur.quick) {
+    const qi = cur.quick.find(x => x.id === p.itemId), qn = qi ? cur.quick.indexOf(qi) + 1 : 0;
+    const n = qi ? qi.photoIds.indexOf(id) + 1 : 1;
+    return new File([p.blob], [slug(cur.unit)||'Unit', 'QuickWalk', qn && 'Item' + qn, n].filter(Boolean).join('_') + '.jpg', {type:'image/jpeg'});
+  }
   const di = f ? f.item.defs.findIndex(d => d.photoIds.includes(id)) : -1;
   const n = di >= 0 ? f.item.defs[di].photoIds.indexOf(id)+1 : 1;
   const tag = f && f.item.defs.length > 1 ? 'Def' + (di+1) : '';
@@ -452,6 +493,7 @@ async function sharePhoto(id) {
 }
 async function saveAllPhotos() {
   const ids = []; cur.rooms.forEach(r => r.items.forEach(i => itemPhotoIds(i).forEach(id => photoCache.has(id) && ids.push(id))));
+  (cur.quick || []).filter(q => q.status !== 'discarded').forEach(q => q.photoIds.forEach(id => photoCache.has(id) && ids.push(id)));
   if (!ids.length) return toast('No photos in this inspection yet');
   const files = ids.map(photoFile);
   try { if (navigator.canShare && navigator.canShare({files})) { await navigator.share({files}); return; } }
@@ -492,7 +534,8 @@ async function pdfImg(id) {
   const o = {data, w:r.w, h:r.h}; pdfImgCache.set(id, o); return o;
 }
 const pdfClean = s => String(s ?? '').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[–—]/g,'-').replace(/…/g,'...').replace(/[^\x09\x0A\x20-\xFF]/g,'?');
-async function buildPDF(kind) {
+async function buildPDF(kind, insp = cur) {
+  if (insp.type === 'quick') insp = quickAsInspection(insp);
   const J = window.jspdf && window.jspdf.jsPDF;
   if (!J) throw new Error('PDF library not loaded. Connect to the internet once and try again.');
   const doc = new J({unit:'mm', format:'letter'});
@@ -507,34 +550,35 @@ async function buildPDF(kind) {
     for (const line of doc.splitTextToSize(pdfClean(str), w)) { need(lh); doc.text(line, x, y + lh*0.8); y += lh; }
   }
   const full = kind === 'full';
-  const rooms = cur.rooms;
-  const all = inspStats(cur);
+  const rooms = insp.rooms;
+  const all = inspStats(insp);
 
   // header block
   doc.setFillColor(20, 30, 50); doc.rect(0, 0, W, 30, 'F');
   doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(18);
-  doc.text(cfg(cur).label + (full ? ' - Full Report' : ' - Deficiency List'), M, 13);
+  doc.text(insp.type === 'quick' ? 'Quick Walk - Items by Trade' : cfg(insp).label + (full ? ' - Full Report' : ' - Deficiency List'), M, 13);
   doc.setFont('helvetica','normal'); doc.setFontSize(11);
-  doc.text(pdfClean(cur.site || ''), M, 21); doc.text(pdfClean('Unit: ' + (cur.unit || '')), M, 26.5);
+  doc.text(pdfClean(insp.site || ''), M, 21); doc.text(pdfClean('Unit: ' + (insp.unit || '')), M, 26.5);
   y = 36;
-  para('Site: ' + (cur.site||'-'), M, CW, 11, true);
-  para('Unit / address: ' + (cur.unit||'-'), M, CW, 11, true);
-  para('Date: ' + cur.date + '     Inspector: ' + (cur.inspector||'-'), M, CW, 11, true);
-  if (cur.notes) para('Notes: ' + cur.notes, M, CW, 10, false, [60,60,60]);
+  para('Site: ' + (insp.site||'-'), M, CW, 11, true);
+  para('Unit / address: ' + (insp.unit||'-'), M, CW, 11, true);
+  para('Date: ' + insp.date + '     Inspector: ' + (insp.inspector||'-'), M, CW, 11, true);
+  if (insp.notes) para('Notes: ' + insp.notes, M, CW, 10, false, [60,60,60]);
   y += 3;
-  para(`Overall: ${statLine(all)}  (${all.p} pass, ${all.d} deficiency, ${all.n} N/A, ${all.t-all.c} unchecked)`, M, CW, 10, false);
+  const quickPdf = insp.type === 'quick';
+  para(quickPdf ? `Items: ${all.t}` : `Overall: ${statLine(all)}  (${all.p} pass, ${all.d} deficiency, ${all.n} N/A, ${all.t-all.c} unchecked)`, M, CW, 10, false);
   y += 2;
 
   // per-room summary
-  need(12); doc.setFont('helvetica','bold'); doc.setFontSize(12); color([0,0,0]); doc.text('Summary by room', M, y+4); y += 7;
+  need(12); doc.setFont('helvetica','bold'); doc.setFontSize(12); color([0,0,0]); doc.text((insp.type === 'quick' ? 'Summary by trade' : 'Summary by room'), M, y+4); y += 7;
   const cx = [M, M+78, M+108, M+128, M+146, M+164];
   doc.setFontSize(9); doc.setFillColor(225,229,236); doc.rect(M, y, CW, 6, 'F');
-  ['Room','Checked','Pass','Deficiency','N/A','Open'].forEach((t,i) => doc.text(t, cx[i]+1, y+4.2)); y += 6;
+  (quickPdf ? ['Trade','Items'] : ['Room','Checked','Pass','Deficiency','N/A','Open']).forEach((t,i) => doc.text(t, cx[i]+1, y+4.2)); y += 6;
   doc.setFont('helvetica','normal');
   for (const r of rooms) {
     const s = stats(r.items); need(6);
     color(s.d ? COL.def : [0,0,0]);
-    [r.name, `${s.c}/${s.t}`, s.p, s.d, s.n, s.t-s.c].forEach((t,i) => doc.text(pdfClean(t), cx[i]+1, y+4.2));
+    (quickPdf ? [r.name, s.t] : [r.name, `${s.c}/${s.t}`, s.p, s.d, s.n, s.t-s.c]).forEach((t,i) => doc.text(pdfClean(t), cx[i]+1, y+4.2));
     doc.setDrawColor(200,204,212); doc.line(M, y+6, M+CW, y+6); y += 6;
   }
   y += 5;
@@ -556,7 +600,7 @@ async function buildPDF(kind) {
     for (let k = 0; k < list.length; k++) {
       const d = list[k], multi = list.length > 1;
       need(14);
-      para((multi ? `${k+1}) ` : '') + 'Fix: ' + (d.note || '(no description)'), M+indent, CW-indent, 10, false);
+      para((multi ? `${k+1}) ` : '') + (insp.type === 'quick' ? 'Note: ' : 'Fix: ') + (d.note || '(no description)'), M+indent, CW-indent, 10, false);
       if (d.trade) para('Trade: ' + d.trade, M+indent, CW-indent, 10, true, [40,40,40]);
       y += 1; await photosBlock(d); if (multi) y += 1;
     }
@@ -567,14 +611,14 @@ async function buildPDF(kind) {
     doc.setFont('helvetica','bold'); doc.setFontSize(12); color([0,0,0]);
     doc.text(pdfClean(r.name), M+2, y+5.3);
     const s = stats(r.items); doc.setFontSize(9); doc.setFont('helvetica','normal');
-    doc.text(pdfClean(statLine(s)), M+CW-2, y+5.2, {align:'right'}); y += 10;
+    doc.text(pdfClean(quickPdf ? `${s.t} item${s.t===1?'':'s'}` : statLine(s)), M+CW-2, y+5.2, {align:'right'}); y += 10;
   }
 
   if (!full) {
     const withDef = rooms.filter(r => r.items.some(i => i.status === 'def'));
     need(10); doc.setFont('helvetica','bold'); doc.setFontSize(14); color([0,0,0]);
-    doc.text(`Deficiencies (${all.d})`, M, y+5); y += 9;
-    if (!withDef.length) para('No deficiencies recorded.', M, CW, 11, false);
+    doc.text(quickPdf ? `Items (${all.t})` : `Deficiencies (${all.d})`, M, y+5); y += 9;
+    if (!withDef.length) para(quickPdf ? 'No items to send.' : 'No deficiencies recorded.', M, CW, 11, false);
     for (const r of withDef) {
       roomHead(r);
       let n = 0;
@@ -601,11 +645,26 @@ async function buildPDF(kind) {
   const n = doc.internal.getNumberOfPages();
   for (let i = 1; i <= n; i++) {
     doc.setPage(i); doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(100,100,100);
-    doc.text(pdfClean(`${cur.site || ''} ${cur.unit || ''} - ${cur.date}`.trim()), M, H-8);
+    doc.text(pdfClean(`${insp.site || ''} ${insp.unit || ''} - ${insp.date}`.trim()), M, H-8);
     doc.text(`Page ${i} of ${n}`, W-M, H-8, {align:'right'});
   }
-  const base = `QC_${slug(cur.unit) || 'Unit'}_${cur.date}` + (cfg(cur).short ? '_' + cfg(cur).short : '');
-  return new File([doc.output('blob')], full ? base + '.pdf' : base + '_Deficiencies.pdf', {type:'application/pdf'});
+  const base = `QC_${slug(insp.unit) || 'Unit'}_${insp.date}` + (cfg(insp).short ? '_' + cfg(insp).short : '');
+  return new File([doc.output('blob')], full || insp.type === 'quick' ? base + '.pdf' : base + '_Deficiencies.pdf', {type:'application/pdf'});
+}
+/* Quick Walk -> a synthetic inspection for the PDF: untriaged items grouped by trade (safety first), each a deficiency */
+function quickAsInspection(w) {
+  const groups = new Map();
+  w.quick.forEach((q, idx) => {
+    if (q.status !== 'untriaged') return;
+    const trade = (q.trade || '').trim() || 'No trade assigned';
+    if (!groups.has(trade)) groups.set(trade, []);
+    const first = (q.text || '').split('\n')[0].trim();
+    const label = (first.length > 70 ? first.slice(0, 67) + '...' : first) || 'Photo only';
+    groups.get(trade).push({safety:q.safety, item:{id:q.id, name:(q.safety ? 'SAFETY - ' : '') + label, status:'def', group:'custom',
+      defs:[{id:q.id, note:q.text || '', trade:'', photoIds:q.photoIds}]}});
+  });
+  const names = [...groups.keys()].sort((a, b) => a === 'No trade assigned' ? 1 : b === 'No trade assigned' ? -1 : a.localeCompare(b));
+  return {...w, rooms: names.map(n => ({id:n, type:'trade', name:n, items:groups.get(n).sort((a, b) => (b.safety?1:0) - (a.safety?1:0)).map(x => x.item)}))};
 }
 async function exportPDF(kind) {
   await flush();
@@ -657,7 +716,7 @@ async function listHTML() {
   const all = (await dbGetAll('inspections')).map(migrate).sort((a,b) => b.createdAt - a.createdAt);
   return `${topbar('', 'QC Inspections')}<div class="wrap">
   <button class="btn pri block" data-act="newInsp" style="margin-bottom:12px">+ New inspection</button>
-  ${all.length ? all.map(i => { const s = inspStats(i); return `<div class="card tap" data-act="nav" data-to="#/i/${i.id}">
+  ${all.length ? all.map(i => { if (i.type === 'quick') return quickCardHTML(i); const s = inspStats(i); return `<div class="card tap" data-act="nav" data-to="#/i/${i.id}">
       <h3>${esc(i.unit || '(no unit yet)')}</h3><div class="pills" style="margin:2px 0 4px"><span class="pill">${esc(cfg(i).label)}</span></div><div class="muted">${esc(i.site || 'No site')} · ${esc(i.date)} · ${esc(i.inspector || '')}</div>
       <div class="pills"><span class="pill">${i.rooms.length} room${i.rooms.length===1?'':'s'}</span><span class="pill">${statLine(s)}</span>
       ${s.t && s.c===s.t ? '<span class="pill ok">Complete</span>' : ''}</div>${progBar(s)}</div>`; }).join('')
@@ -744,14 +803,97 @@ function roomHTML(room) {
    <button class="btn grow" data-act="nav" data-to="#/i/${cur.id}/r/${idx<cur.rooms.length-1?cur.rooms[idx+1].id:''}" ${idx===cur.rooms.length-1?'disabled':''}>Next room ›</button></div>
   <button class="btn pri block" data-act="nav" data-to="#/i/${cur.id}" style="margin-top:8px">Done with room</button></div>`;
 }
+/* ============ Quick Walk ============ */
+const qSortMode = () => ui.qSort === null ? !!cur.endedAt : ui.qSort;
+function purgeEmptyQuick() {
+  if (!cur || !cur.quick) return;
+  const keep = cur.quick.filter(q => q.status !== 'untriaged' || q.text.trim() || q.photoIds.length);
+  if (keep.length !== cur.quick.length) { cur.quick = keep; queueSave(); }
+}
+function quickCardHTML(i) {
+  const q = i.quick || [], live = q.filter(x => x.status === 'untriaged'), safe = live.filter(x => x.safety).length;
+  const sorted = q.filter(x => x.status !== 'untriaged').length, tot = q.length;
+  return `<div class="card tap" data-act="nav" data-to="#/i/${i.id}">
+    <h3>${esc(i.unit || '(no unit yet)')}</h3><div class="pills" style="margin:2px 0 4px"><span class="pill">Quick Walk</span>${i.endedAt ? '' : '<span class="pill ok">In progress</span>'}</div>
+    <div class="muted">${esc(i.site || 'No site')} · ${esc(i.date)}</div>
+    <div class="pills"><span class="pill">${tot} item${tot===1?'':'s'}</span><span class="pill">${live.length} to sort</span>${safe ? `<span class="pill d">${safe} safety</span>` : ''}</div>
+    <div class="prog"><i style="width:${tot ? Math.round(sorted/tot*100) : 0}%"></i></div></div>`;
+}
+function qItemHTML(q, n, sort) {
+  const sel = ui.qSel.has(q.id);
+  const time = new Date(q.createdAt).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+  return `<div class="qitem${q.safety ? ' safe' : ''}"><div class="qh">
+    ${sort ? `<input type="checkbox" class="qsel" data-act="qSelect" data-q="${q.id}" ${sel ? 'checked' : ''} aria-label="Select item">` : ''}
+    <b>Item ${n} <span class="muted">${esc(time)}</span></b>
+    <button class="btn sm${q.safety ? ' on-safe' : ''}" data-act="qSafety" data-q="${q.id}" aria-pressed="${q.safety}">⚠ Safety</button>
+    ${sort ? '' : `<button class="btn sm danger" data-act="qDiscard" data-q="${q.id}" aria-label="Discard">✕</button>`}</div>
+    ${q.photoIds.some(id => photoCache.has(id)) ? photoThumbs(q) : ''}
+    <textarea data-q="${q.id}" data-f="text" placeholder="Description (optional – use the keyboard mic to dictate)">${esc(q.text)}</textarea>
+    <div class="row" style="margin-top:8px"><button class="btn sm grow" data-act="qPhoto" data-q="${q.id}">📷 + Photo</button></div>
+    ${sort ? `<label class="f" style="margin-top:10px">Trade (optional)<input type="text" list="trades" data-q="${q.id}" data-f="trade" value="${esc(q.trade)}" autocomplete="off"></label>
+      <div class="row"><button class="btn sm grow pri" data-act="qMove" data-q="${q.id}">Move to inspection</button>
+      <button class="btn sm danger" data-act="qDiscard" data-q="${q.id}">Discard</button></div>` : ''}</div>`;
+}
+function quickHTML() {
+  const all = cur.quick, sort = qSortMode(), ended = !!cur.endedAt;
+  const live = all.filter(x => x.status === 'untriaged'), moved = all.filter(x => x.status === 'moved'), disc = all.filter(x => x.status === 'discarded');
+  const num = new Map(all.map((q, i) => [q.id, i + 1]));
+  const ordered = sort ? live.slice().sort((a, b) => (b.safety ? 1 : 0) - (a.safety ? 1 : 0) || b.createdAt - a.createdAt)
+                       : live.slice().sort((a, b) => b.createdAt - a.createdAt);
+  const nSel = ui.qSel.size;
+  return `${topbar('#/', cur.unit, 'Quick Walk' + (cur.site ? ' · ' + cur.site : '') + (ended ? ' · ended' : ''))}<div class="wrap">
+  <div class="card"><div class="qcount">${live.length} item${live.length === 1 ? '' : 's'} ${sort ? 'to sort' : 'captured'}</div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn grow" data-act="qSortToggle">${sort ? '‹ Back to capture' : 'Sort / send ›'}</button>
+      ${ended ? '<button class="btn grow" data-act="qResume">Resume walk</button>' : '<button class="btn grow danger" data-act="qEnd">End walk</button>'}</div></div>
+  ${sort && live.length ? `<div class="row" style="margin-bottom:10px"><button class="btn sm grow" data-act="qSelAll">${nSel === live.length ? 'Clear selection' : 'Select all'}</button>
+     <button class="btn sm grow" data-act="qAssignTrade" ${nSel ? '' : 'disabled'}>Trade (${nSel})</button>
+     <button class="btn sm grow pri" data-act="qMove" ${nSel ? '' : 'disabled'}>Move (${nSel})</button>
+     <button class="btn sm danger" data-act="qDiscardSel" ${nSel ? '' : 'disabled'}>Discard</button></div>` : ''}
+  ${ordered.length ? ordered.map(q => qItemHTML(q, num.get(q.id), sort)).join('') : `<div class="empty">${sort ? 'Nothing left to sort.' : 'Tap Photo to start capturing.'}</div>`}
+  ${moved.length ? `<h2>Moved (${moved.length})</h2>` + moved.map(q => `<div class="muted" style="margin:0 2px 6px">Item ${num.get(q.id)} → ${esc(q.movedTo ? q.movedTo.label : 'inspection')}${q.movedTo ? ` · <a href="#/i/${q.movedTo.inspectionId}">open</a>` : ''}</div>`).join('') : ''}
+  ${disc.length ? `<h2>Discarded (${disc.length})</h2>` + disc.map(q => `<div class="row" style="align-items:center;margin-bottom:6px"><span class="muted grow">Item ${num.get(q.id)} ${esc((q.text || 'photo').slice(0, 40))}</span><button class="btn sm" data-act="qRestore" data-q="${q.id}">Restore</button></div>`).join('') : ''}
+  ${sort ? `<h2>Export</h2><div class="row"><button class="btn grow" data-act="pdfQuick">PDF by trade</button><button class="btn grow" data-act="savePhotos">Save all photos</button></div>
+    <div class="row" style="margin-top:8px"><button class="btn grow" data-act="backupOne">Backup (.json)</button><button class="btn danger grow" data-act="deleteInsp">Delete walk</button></div>` : ''}
+  ${ended ? '' : `<div class="qbar"><button class="btn pri" data-act="qPhotoNew">📷 Photo</button><button class="btn note" data-act="qNote">✎ Note</button></div>`}</div>`;
+}
+async function moveQuickItems(ids, target) {
+  try {
+    let room = target.rooms.find(r => r.type === 'general');
+    if (!room) { room = {id:uid(), type:'general', name:'Quick Walk items', order:target.rooms.length, items:[]}; target.rooms.push(room); }
+    const photoPuts = [];
+    for (const id of ids) {
+      const q = cur.quick.find(x => x.id === id); if (!q) continue;
+      const first = (q.text || '').split('\n')[0].trim();
+      const name = (q.safety ? 'SAFETY - ' : '') + ((first.length > 60 ? first.slice(0, 57) + '...' : first) || 'Photo only');
+      const item = {id:uid(), templateKey:'custom', name, check:'', method:'', group:'custom', each:false, status:'def',
+                    defs:[{id:uid(), note:q.text || '', trade:q.trade || '', photoIds:q.photoIds.slice()}]};
+      room.items.push(item);
+      for (const pid of q.photoIds) { const p = photoCache.get(pid); if (p) photoPuts.push({id:pid, inspectionId:target.id, itemId:item.id, blob:p.blob, createdAt:p.createdAt}); }
+      q.status = 'moved'; q.movedTo = {inspectionId:target.id, label:(target.unit || 'inspection') + ' · ' + cfg(target).label};
+      q.movedPhotoIds = q.photoIds; q.photoIds = [];
+    }
+    target.updatedAt = Date.now();
+    const t = db.transaction(['photos', 'inspections'], 'readwrite');   // one atomic write: record + re-homed photos
+    t.objectStore('inspections').put(JSON.parse(JSON.stringify(target)));
+    photoPuts.forEach(p => t.objectStore('photos').put(p));
+    await txDone(t);
+    photoPuts.forEach(p => { const c = photoCache.get(p.id); if (c) URL.revokeObjectURL(c.url); photoCache.delete(p.id); });
+    ids.forEach(id => ui.qSel.delete(id));
+    await saveNow(); modal(''); render(true);
+    toast('Moved ' + ids.length + ' item(s) to ' + (target.unit || 'inspection'));
+  } catch (e) { storageFail(e); try { await loadInspection(cur.id); } catch (_) {} render(true); }
+}
+
 async function render(keepScroll) {
   const y = window.scrollY;
   try {
     if (screen === 'list') app.innerHTML = await listHTML();
-    else if (screen === 'insp') app.innerHTML = inspHTML();
+    else if (screen === 'insp') app.innerHTML = cur.type === 'quick' ? quickHTML() : inspHTML();
     else { const r = findRoom(curRoomId); if (!r) return nav('#/i/' + cur.id); app.innerHTML = roomHTML(r); }
   } catch (e) { storageFail(e); }
   window.scrollTo(0, keepScroll ? y : 0);
+  if (ui.qFocus) { const el = document.querySelector('[data-q="' + ui.qFocus + '"][data-f="text"]'); ui.qFocus = null; if (el) el.focus({preventScroll:true}); }
 }
 
 /* ============ routing ============ */
@@ -759,6 +901,7 @@ function nav(h) { if (location.hash === h) route(); else location.hash = h; }
 let routing = Promise.resolve();
 function route() { routing = routing.then(doRoute).catch(storageFail); return routing; }
 async function doRoute() {
+  purgeEmptyQuick();
   await flush();
   const m = location.hash.match(/^#\/i\/([^/]+)(?:\/r\/([^/]+))?/);
   if (!m) { screen = 'list'; cur = null; return render(); }
@@ -779,13 +922,74 @@ const ACT = {
       `<button class="btn" data-act="makeInsp" data-type="${k}">${esc(v.label)}</button>`).join('')}</div>
       <button class="btn block" data-act="closeModal" style="margin-top:10px">Cancel</button>`),
   async makeInsp(t) {
-    modal('');
     const last = (await dbGetAll('inspections')).sort((a,b) => b.createdAt - a.createdAt)[0];
+    if (t.dataset.type === 'quick') {
+      return modal(`<h3>Quick Walk</h3>
+        <label class="f">Site / building<input type="text" id="qfSite" value="${esc(last ? last.site : '')}" autocomplete="off"></label>
+        <label class="f">Unit<input type="text" id="qfUnit" autocomplete="off"></label>
+        <button class="btn pri block" data-act="quickStart">Start walk</button>
+        <button class="btn block" data-act="closeModal" style="margin-top:10px">Cancel</button>`);
+    }
+    modal('');
     const i = {id:uid(), site:last?last.site:'', unit:'', date:today(), inspector:last?last.inspector:'', notes:'', type:t.dataset.type, rooms:[], createdAt:Date.now(), updatedAt:Date.now()};
     (cfg(i).autoRooms || []).forEach(k => i.rooms.push(mkRoom(i, k))); reorder(i);
     try { await dbPut('inspections', i); } catch (e) { return storageFail(e); }
     ui.detailsOpen = null; nav('#/i/' + i.id);
   },
+  async quickStart() {
+    const unit = $('#qfUnit').value.trim(), site = $('#qfSite').value.trim();
+    if (!unit) return toast('Enter the unit first');
+    const last = (await dbGetAll('inspections')).sort((a,b) => b.createdAt - a.createdAt)[0];
+    const i = {id:uid(), site, unit, date:today(), inspector:last?last.inspector:'', notes:'', type:'quick', rooms:[], quick:[], createdAt:Date.now(), updatedAt:Date.now()};
+    try { await dbPut('inspections', i); } catch (e) { return storageFail(e); }
+    modal(''); nav('#/i/' + i.id);
+  },
+  qPhotoNew: () => { pendingQuick = 'new'; pendingItemId = null; $('#cam').click(); },
+  qPhoto: t => { pendingQuick = t.dataset.q; pendingItemId = null; $('#cam').click(); },
+  qNote: () => { const q = newQuickItem(); cur.quick.push(q); ui.qFocus = q.id; saveNow(); render(); },
+  qSafety: t => { const q = cur.quick.find(x => x.id === t.dataset.q); q.safety = !q.safety; saveNow(); render(true); },
+  qDiscard: t => { const q = cur.quick.find(x => x.id === t.dataset.q); q.status = 'discarded'; ui.qSel.delete(q.id); saveNow(); render(true); toast('Discarded', {action:'Undo', onAction:()=>{ q.status = 'untriaged'; saveNow(); render(true); }}); },
+  qRestore: t => { cur.quick.find(x => x.id === t.dataset.q).status = 'untriaged'; saveNow(); render(true); },
+  qSortToggle: () => { ui.qSort = !qSortMode(); render(); },
+  qEnd: () => {
+    purgeEmptyQuick();
+    if (!confirm('End this walk? You can still add, edit and sort items afterwards.')) return;
+    cur.endedAt = Date.now(); ui.qSort = true; saveNow(); render();
+  },
+  qResume: () => { cur.endedAt = null; ui.qSort = false; saveNow(); render(); },
+  qAssignTrade: () => {
+    const ids = [...ui.qSel]; if (!ids.length) return toast('Select items first');
+    const t = prompt('Trade for ' + ids.length + ' selected item(s)'); if (t === null) return;
+    ids.forEach(id => { cur.quick.find(x => x.id === id).trade = t.trim(); }); saveNow(); render(true);
+  },
+  qDiscardSel: () => { const ids = [...ui.qSel]; if (!ids.length) return toast('Select items first'); ids.forEach(id => cur.quick.find(x => x.id === id).status = 'discarded'); ui.qSel.clear(); saveNow(); render(true); },
+  qSelAll: () => { const live = cur.quick.filter(x => x.status === 'untriaged'); if (ui.qSel.size === live.length) ui.qSel.clear(); else live.forEach(x => ui.qSel.add(x.id)); render(true); },
+  qMove: async t => {
+    window._moveIds = t.dataset.q ? [t.dataset.q] : [...ui.qSel];
+    if (!window._moveIds.length) return toast('Select items first');
+    const all = (await dbGetAll('inspections')).map(migrate).filter(i => i.type !== 'quick' && i.id !== cur.id).sort((a,b) => b.createdAt - a.createdAt);
+    modal(`<h3>Move ${window._moveIds.length} item(s) to an inspection</h3>
+      <div class="grid" style="grid-template-columns:1fr">${all.map(i => `<button class="btn" data-act="qMoveTo" data-insp="${i.id}">${esc(i.unit || '(no unit)')} · ${esc(cfg(i).label)} · ${esc(i.date)}</button>`).join('')}
+      <button class="btn pri" data-act="qMoveNewForm">+ New inspection…</button></div>
+      <button class="btn block" data-act="closeModal" style="margin-top:10px">Cancel</button>`);
+  },
+  qMoveNewForm: () => modal(`<h3>New inspection for these items</h3>
+      <label class="f">Site / building<input type="text" id="mnSite" value="${esc(cur.site)}" autocomplete="off"></label>
+      <label class="f">Unit<input type="text" id="mnUnit" value="${esc(cur.unit)}" autocomplete="off"></label>
+      <div class="grid" style="grid-template-columns:1fr">${Object.entries(TYPES).filter(([k]) => k !== 'quick').map(([k,v]) =>
+        `<button class="btn" data-act="qMoveNew" data-type="${k}">Create ${esc(v.label)} and move</button>`).join('')}</div>
+      <button class="btn block" data-act="closeModal" style="margin-top:10px">Cancel</button>`),
+  qMoveNew: async t => {
+    const site = $('#mnSite').value.trim(), unit = $('#mnUnit').value.trim();
+    const i = {id:uid(), site, unit, date:today(), inspector:cur.inspector, notes:'', type:t.dataset.type, rooms:[], createdAt:Date.now(), updatedAt:Date.now()};
+    (cfg(i).autoRooms || []).forEach(k => i.rooms.push(mkRoom(i, k))); reorder(i);
+    await moveQuickItems(window._moveIds, i);
+  },
+  qMoveTo: async t => {
+    const target = (await dbGetAll('inspections')).find(i => i.id === t.dataset.insp);
+    if (target) await moveQuickItems(window._moveIds, migrate(target));
+  },
+  pdfQuick: () => exportPDF('def'),
   backupAll: () => exportBackup(), backupOne: () => exportBackup(cur.id),
   importPick: () => $('#imp').click(),
   toggleDetails: () => { ui.detailsOpen = !(ui.detailsOpen === null ? !cur.unit : ui.detailsOpen); render(true); },
@@ -874,17 +1078,22 @@ document.addEventListener('click', e => {
   if (t.dataset.act === 'closeModal' && t.tagName !== 'BUTTON' && e.target.closest('[data-stop]')) return;
   if (t.tagName === 'INPUT') return;
   const now = Date.now();                       // duplicate-tap guard
-  const key = t.dataset.act + (t.dataset.id || t.dataset.type || t.dataset.to || t.dataset.k || '') + (t.dataset.v || '') + (t.dataset.d || '');
+  const key = t.dataset.act + (t.dataset.id || t.dataset.type || t.dataset.to || t.dataset.k || t.dataset.q || t.dataset.insp || '') + (t.dataset.v || '') + (t.dataset.d || '');
   if (t.type !== 'checkbox' && key === window._lastKey && now - window._lastAt < 500) return;
   window._lastKey = key; window._lastAt = now;
   const fn = ACT[t.dataset.act]; if (!fn) return;
   const run = () => Promise.resolve(fn(t)).catch(storageFail);
-  if (['photo', 'importPick', 'viewPhoto'].includes(t.dataset.act)) run();   // need the tap gesture right now
+  if (['photo', 'qPhoto', 'qPhotoNew', 'importPick', 'viewPhoto'].includes(t.dataset.act)) run();   // need the tap gesture right now
   else setTimeout(run, 90);
 });
-document.addEventListener('change', e => { const t = e.target; if (t.matches('input[data-act="hidePassed"]')) ACT.hidePassed(t); });
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.matches('input[data-act="hidePassed"]')) ACT.hidePassed(t);
+  if (t.matches('input[data-act="qSelect"]')) { if (t.checked) ui.qSel.add(t.dataset.q); else ui.qSel.delete(t.dataset.q); render(true); }
+});
 document.addEventListener('input', e => {
   const t = e.target, f = t.dataset && t.dataset.f; if (!f || !cur) return;
+  if (t.dataset.q) { const q = cur.quick.find(x => x.id === t.dataset.q); if (q) { q[f] = t.value; queueSave(); } return; }
   if (t.dataset.scope === 'insp') cur[f] = t.value; else { const x = findItem(t.dataset.id); if (!x) return; const d = x.item.defs.find(d => d.id === t.dataset.d); if (d) d[f] = t.value; }
   queueSave();
 });
@@ -901,6 +1110,7 @@ function openViewer(id) {
     else if (a === 'save') sharePhoto(id);
     else if (a === 'del' && confirm('Delete this photo?')) {
       const f = findItem(p.itemId); if (f) f.item.defs.forEach(d => d.photoIds = d.photoIds.filter(x => x !== id));
+      const qq = cur.quick && cur.quick.find(x => x.id === p.itemId); if (qq) qq.photoIds = qq.photoIds.filter(x => x !== id);
       await deletePhotos([id]); await saveNow(); v.remove(); render(true);
     }
   };
