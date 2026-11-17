@@ -174,13 +174,13 @@ CHECKLIST_GROUPS_SEED.forEach(g => { g.estimatedMinutes = 20; });
 const PLAYBOOK_SEED = [
   {id:'pb_001', phase:'Excavation', anchor:'start', offsetDays:-5, type:'check', text:"Check 7-day forecast for dig and cribbing; line up fallback work if weather threatens", trade:'Excavator', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
   {id:'pb_002', phase:'Excavation', anchor:'start', offsetDays:-7, type:'book', text:"Frost plan: ground heaters/blankets booked so dig and footings aren't stalled", trade:'Excavator', hiddenBy:null, cost:'high', season:'winter', projects:['all'], gate:false, needsInput:false, active:true},
-  {id:'pb_003', phase:'Excavation', anchor:'end', offsetDays:0, type:'verify', text:"Over-dig clearance meets cribber's requirement BEFORE excavator leaves site", trade:'Excavator', hiddenBy:'Cribbing', cost:'high', season:'all', projects:['all'], gate:true, needsInput:true, inputNote:"Store cribber's required clearance in text", active:true},
-  {id:'pb_004', phase:'Install Sewer Trench', anchor:'end', offsetDays:-3, type:'book', text:"Plumber + sewer line inspection booked so trench can be backfilled before cribbers start", trade:'Plumber', hiddenBy:'Cribbing', cost:'high', season:'all', projects:['all'], gate:false, needsInput:true, inputNote:"Confirm real inspection lead time", active:true},
+  {id:'pb_003', phase:'Excavation', anchor:'end', offsetDays:0, type:'verify', text:"Over-dig clearance is at least 24\" before excavator leaves site (cribber's requirement)", trade:'Excavator', hiddenBy:'Cribbing', cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
+  {id:'pb_004', phase:'Install Sewer Trench', anchor:'end', offsetDays:-3, type:'book', text:"Plumber + sewer line inspection booked (1-2 business day lead time) so trench can be backfilled before cribbers start", trade:'Plumber', hiddenBy:'Cribbing', cost:'high', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
   {id:'pb_005', phase:'Cribbing', anchor:'start', offsetDays:-1, type:'gate', text:"READY FOR CRIBBING? Sewer inspection passed, trench backfilled, over-dig confirmed, forecast OK", trade:'Cribber', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
   {id:'pb_006', phase:'Framing', anchor:'start', offsetDays:-7, type:'gate', text:"READY FOR FRAMING? Flatwork finish date confirmed, cure time met, framers confirmed", trade:'Concrete flatwork', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
   {id:'pb_007', phase:'Framing', anchor:'start', offsetDays:3, type:'book', text:"Book exterior backer board to follow framers as 1st/2nd floor goes up", trade:'Exterior', hiddenBy:null, cost:'medium', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
   {id:'pb_008', phase:'Framing', anchor:'end', offsetDays:-5, type:'gate', text:"Framing finish date reconfirmed with framers; IPD and plumbing rough-in confirmed to start behind them", trade:'Framer', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
-  {id:'pb_009', phase:'Roofing', anchor:'start', offsetDays:-14, type:'check', text:"If metal roof: get roofer's real duration and put it in the schedule (longer than shingles)", trade:'Roofer', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, needsInput:true, inputNote:"Metal roof duration in days", active:true},
+  {id:'pb_009', phase:'Roofing', anchor:'start', offsetDays:-14, type:'check', text:"If metal roof: full roofing takes ~10 days (3 prep + 4 base + 3 panel finish) vs ~7 for shingles - set this unit's Roofing phase duration accordingly in the Playbook editor", trade:'Roofer', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
   {id:'pb_010', phase:'Roofing', anchor:'start', offsetDays:-5, type:'gate', text:"READY FOR ROOFERS? Framing + Load Roof complete, roofers confirmed", trade:'Roofer', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
   {id:'pb_011', phase:'Roofing', anchor:'end', offsetDays:0, type:'book', text:"Roof 100% complete → book power meter inspection the same day (city won't pass it before)", trade:'Electrician', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, chain:'roof-to-heat', needsInput:false, active:true},
   {id:'pb_012', phase:'HVAC Rough-in', anchor:'start', offsetDays:-1, type:'verify', text:"Plumbers cut down mech room drains and cap them so HVAC can tie in furnace drain line", trade:'Plumber', hiddenBy:'Insulation', cost:'medium', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
@@ -559,6 +559,7 @@ async function loadAll(){
   // run first in the chain (per the spec's own "do this first").
   await migrateAddRoughInPhasesToSequence_v1();
   await migratePlaybookSeed_v1();
+  await migratePlaybookFillInputs_v1();
   await migrateUnitNames();
   await migrateRoundsFields();
   await migrateDefIds();
@@ -1133,6 +1134,44 @@ async function migratePlaybookSeed_v1(){
   }
   if(changed) await sset('phaseDurations', state.phaseDurations);
   await sset('migrated_playbook_seed_v1', true);
+}
+
+/* Fills in the real numbers Josh gave for the three rules that launched
+   with a `needsInput` placeholder (seeded before he had them): the
+   cribber's over-dig clearance (24"), the real sewer-inspection lead
+   time (1-2 business days), and the real metal-roof duration (~10 days:
+   3 prep + 4 base + 3 panel finish, vs ~7 for shingles). Matches each
+   rule by id and only touches it if its text still equals the original
+   placeholder wording, so anything Josh has since hand-edited himself is
+   left alone. Clears needsInput/inputNote on whichever ones it updates -
+   if he's already edited a rule himself, needsInput stays however he
+   left it. Note: pb_009's real number is a per-unit Roofing phase
+   duration override for metal-roof units, not a global default - this
+   migration doesn't touch phaseDurations.Roofing, since that single flat
+   value is shared by every unit regardless of roof type (same known
+   limitation as the roofing/rough-in overlap note above). */
+async function migratePlaybookFillInputs_v1(){
+  const done = await sget('migrated_playbook_fill_inputs_v1', false);
+  if(done) return;
+  const fills = [
+    {id:'pb_003', oldText:"Over-dig clearance meets cribber's requirement BEFORE excavator leaves site",
+      newText:"Over-dig clearance is at least 24\" before excavator leaves site (cribber's requirement)"},
+    {id:'pb_004', oldText:"Plumber + sewer line inspection booked so trench can be backfilled before cribbers start",
+      newText:"Plumber + sewer line inspection booked (1-2 business day lead time) so trench can be backfilled before cribbers start"},
+    {id:'pb_009', oldText:"If metal roof: get roofer's real duration and put it in the schedule (longer than shingles)",
+      newText:"If metal roof: full roofing takes ~10 days (3 prep + 4 base + 3 panel finish) vs ~7 for shingles - set this unit's Roofing phase duration accordingly in the Playbook editor"},
+  ];
+  let changed = false;
+  for(const fill of fills){
+    const rule = state.playbook.find(r=>r.id===fill.id);
+    if(!rule || rule.text!==fill.oldText) continue;
+    rule.text = fill.newText;
+    rule.needsInput = false;
+    rule.inputNote = undefined;
+    changed = true;
+  }
+  if(changed) await sset('playbook', state.playbook);
+  await sset('migrated_playbook_fill_inputs_v1', true);
 }
 
 /* Projects a unit's remaining linear-track phases forward from its
