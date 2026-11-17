@@ -156,6 +156,46 @@ const CHECKLIST_GROUPS_SEED = [
 ];
 CHECKLIST_GROUPS_SEED.forEach(g => { g.estimatedMinutes = 20; });
 
+/* ---------- Playbook engine seed ---------- */
+/* One-time seed for the `playbook` app_data key (migratePlaybookSeed_v1
+   below) - a looser, chat-tunable sibling to PHASE_CHECKLIST_SEED above.
+   Each rule: phase/anchor/offsetDays locate it against a unit's projected
+   phase timeline (runPlaybookEngine below); type is a display/grouping
+   hint (book/check/verify/gate/standard/remind); hiddenBy names what
+   covers the thing being checked (surfaces it in the Look-Ahead screen's
+   "check before it's covered" bucket); cost feeds both display and this
+   app's own priority/dueType mapping when a rule fires into a real task;
+   season/projects narrow where a rule applies; gate marks a hard go/no-go;
+   chain links rules that depend on the same external trigger (e.g.
+   roof-to-heat); needsInput/inputNote flag a rule Josh still needs to
+   fill in a real number/detail for (surfaced as a badge in the Playbook
+   editor) - a rule with needsInput still fires as written in the
+   meantime, inputNote is guidance for Josh, not a blocker. */
+const PLAYBOOK_SEED = [
+  {id:'pb_001', phase:'Excavation', anchor:'start', offsetDays:-5, type:'check', text:"Check 7-day forecast for dig and cribbing; line up fallback work if weather threatens", trade:'Excavator', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_002', phase:'Excavation', anchor:'start', offsetDays:-7, type:'book', text:"Frost plan: ground heaters/blankets booked so dig and footings aren't stalled", trade:'Excavator', hiddenBy:null, cost:'high', season:'winter', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_003', phase:'Excavation', anchor:'end', offsetDays:0, type:'verify', text:"Over-dig clearance meets cribber's requirement BEFORE excavator leaves site", trade:'Excavator', hiddenBy:'Cribbing', cost:'high', season:'all', projects:['all'], gate:true, needsInput:true, inputNote:"Store cribber's required clearance in text", active:true},
+  {id:'pb_004', phase:'Install Sewer Trench', anchor:'end', offsetDays:-3, type:'book', text:"Plumber + sewer line inspection booked so trench can be backfilled before cribbers start", trade:'Plumber', hiddenBy:'Cribbing', cost:'high', season:'all', projects:['all'], gate:false, needsInput:true, inputNote:"Confirm real inspection lead time", active:true},
+  {id:'pb_005', phase:'Cribbing', anchor:'start', offsetDays:-1, type:'gate', text:"READY FOR CRIBBING? Sewer inspection passed, trench backfilled, over-dig confirmed, forecast OK", trade:'Cribber', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
+  {id:'pb_006', phase:'Framing', anchor:'start', offsetDays:-7, type:'gate', text:"READY FOR FRAMING? Flatwork finish date confirmed, cure time met, framers confirmed", trade:'Concrete flatwork', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
+  {id:'pb_007', phase:'Framing', anchor:'start', offsetDays:3, type:'book', text:"Book exterior backer board to follow framers as 1st/2nd floor goes up", trade:'Exterior', hiddenBy:null, cost:'medium', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_008', phase:'Framing', anchor:'end', offsetDays:-5, type:'gate', text:"Framing finish date reconfirmed with framers; IPD and plumbing rough-in confirmed to start behind them", trade:'Framer', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
+  {id:'pb_009', phase:'Roofing', anchor:'start', offsetDays:-14, type:'check', text:"If metal roof: get roofer's real duration and put it in the schedule (longer than shingles)", trade:'Roofer', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, needsInput:true, inputNote:"Metal roof duration in days", active:true},
+  {id:'pb_010', phase:'Roofing', anchor:'start', offsetDays:-5, type:'gate', text:"READY FOR ROOFERS? Framing + Load Roof complete, roofers confirmed", trade:'Roofer', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
+  {id:'pb_011', phase:'Roofing', anchor:'end', offsetDays:0, type:'book', text:"Roof 100% complete → book power meter inspection the same day (city won't pass it before)", trade:'Electrician', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, chain:'roof-to-heat', needsInput:false, active:true},
+  {id:'pb_012', phase:'HVAC Rough-in', anchor:'start', offsetDays:-1, type:'verify', text:"Plumbers cut down mech room drains and cap them so HVAC can tie in furnace drain line", trade:'Plumber', hiddenBy:'Insulation', cost:'medium', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_013', phase:'Gas Rough-in', anchor:'end', offsetDays:-3, type:'book', text:"Gas rough-in inspection booked ASAP; request gas meter install the moment it passes", trade:'Gas fitter', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, chain:'roof-to-heat', needsInput:false, active:true},
+  {id:'pb_014', phase:'Electrical Rough-in', anchor:'end', offsetDays:-3, type:'check', text:"Power meter on by end of rough-ins? If not, escalate now", trade:'Electrician', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, chain:'roof-to-heat', needsInput:false, active:true},
+  {id:'pb_015', phase:'Insulation', anchor:'start', offsetDays:-3, type:'gate', text:"READY FOR INSULATION? Power meter on, gas meter on, furnace running, rough-in inspections passed", trade:'Insulator', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, chain:'roof-to-heat', needsInput:false, active:true},
+  {id:'pb_016', phase:'Stage 1 Finishing', anchor:'start', offsetDays:-21, type:'check', text:"Reconfirm drywall finish date BEFORE locking finishing bookings (booked 2–3 weeks out)", trade:'Drywaller', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_017', phase:'Texture', anchor:'start', offsetDays:0, type:'check', text:"Is drywall on pace for its confirmed finish? If slipping, warn finishing trades now, not later", trade:'Drywaller', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_018', phase:'Stage 2 Finishing', anchor:'end', offsetDays:0, type:'standard', text:"Finishing trades leave the unit clean — sign-off held until debris is gone", trade:'Finish carpenter', hiddenBy:null, cost:'medium', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_019', phase:'Drywall touchups & sand', anchor:'end', offsetDays:0, type:'standard', text:"Drywall touch-up dust cleaned up before sign-off", trade:'Drywaller', hiddenBy:null, cost:'medium', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_020', phase:'Paint 2nd coat', anchor:'end', offsetDays:0, type:'standard', text:"Painters clean touch-up dust and debris before sign-off", trade:'Painter', hiddenBy:null, cost:'medium', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_021', phase:'Electrical Final', anchor:'start', offsetDays:-3, type:'verify', text:"Hot water tank hooked up properly so breakers go in at electrical final and plumbers can test hot water", trade:'Plumber', hiddenBy:null, cost:'medium', season:'all', projects:['all'], gate:false, needsInput:false, active:true},
+  {id:'pb_022', phase:'Construction Clean', anchor:'start', offsetDays:-3, type:'gate', text:"CLEANERS LAST: drywall touch-ups and paint 2nd coat complete AND cleaned up before cleaners come", trade:'Cleaner', hiddenBy:null, cost:'high', season:'all', projects:['all'], gate:true, needsInput:false, active:true},
+];
+
 // Rebuilt per Josh's "By Phase" spreadsheet: one flat QC list per broad
 // construction phase (not one per schedule item like the retired 145-group
 // library). matchPhase links a group to the exact schedule item name Josh
@@ -427,7 +467,7 @@ const DEFAULT_MASTER = [
 ];
 
 /* ---------- state ---------- */
-let state = { units:[], master:[], instances:[], defs:[], schedule:[], phaseSequence:[], checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[], checklistVersions:[], qcInspections:[], fridayReviewCompletions:[] };
+let state = { units:[], master:[], instances:[], defs:[], schedule:[], phaseSequence:[], playbook:[], phaseDurations:{}, playbookSettings:{}, checklistGroups:[], groupInstances:[], planOrder:[], safetyWalkthroughs:[], checklistVersions:[], qcInspections:[], fridayReviewCompletions:[] };
 let activeTab = 'brief';
 let selectedScheduleUnit = null;
 let selectedLogDate = null;
@@ -476,10 +516,21 @@ async function loadAll(){
   state.defs = await sget('defs', []);
   state.schedule = await sget('schedule', []);
   // The ordered master phase list every phase dropdown now draws from (see
-  // phaseSequenceOptions() below) - edited from a Supabase-connected Claude
-  // chat, not from any UI in this app, so there's nothing here to save it
-  // back out except picking it up like any other chat-safe-writes key.
+  // phaseSequenceOptions() below) - day-to-day editing happens from a
+  // Supabase-connected Claude chat, not from any UI in this app. The one
+  // exception is migrateAddRoughInPhasesToSequence_v1 below, a single
+  // controlled one-time structural patch (same spirit as every other
+  // small migration in this file) - it still doesn't mean the app edits
+  // this key as part of normal use.
   state.phaseSequence = await sget('phaseSequence', []);
+  // Playbook engine: a projective layer on top of currentPhase/ctEnd (see
+  // runPlaybookEngine() below). `playbook` is the rule library (id-keyed
+  // array, so it gets the normal per-item chat-safe-writes merge);
+  // `phaseDurations`/`playbookSettings` are small plain-object settings
+  // Josh tunes, either from this app's own editor or a connected chat.
+  state.playbook = await sget('playbook', []);
+  state.phaseDurations = await sget('phaseDurations', {});
+  state.playbookSettings = await sget('playbookSettings', { lookaheadDays: 14, winterMonths: [11,12,1,2,3], bufferDays: 0 });
   state.planOrder = await sget('planOrder', []);
   state.fridayReviewCompletions = await sget('fridayReviewCompletions', []);
   state.safetyWalkthroughs = await sget('safetyWalkthroughs', []);
@@ -503,6 +554,11 @@ async function loadAll(){
     state.logHistory = LOG_HISTORY_SEED.slice();
     await sset('logHistory', state.logHistory);
   }
+  // Playbook engine: rough-in phases must land in phaseSequence before
+  // the seed migration hands out default phaseDurations, so these two
+  // run first in the chain (per the spec's own "do this first").
+  await migrateAddRoughInPhasesToSequence_v1();
+  await migratePlaybookSeed_v1();
   await migrateUnitNames();
   await migrateRoundsFields();
   await migrateDefIds();
@@ -530,6 +586,7 @@ async function loadAll(){
   await sset('units', state.units);
   await sset('master', state.master);
   await archivePastDayLog();
+  await runPlaybookEngine();
 }
 
 async function archivePastDayLog(){
@@ -1008,6 +1065,260 @@ async function migrateRemoveDuplicateIpdItem_v1(){
     await sset('checklistVersions', state.checklistVersions);
   }
   await sset('migrated_remove_duplicate_ipd_item_v1', true);
+}
+
+/* ---------- Playbook engine ---------- */
+
+/* One-time structural change to phaseSequence (the live, chat-maintained
+   phase list) - inserts the five rough-in phases Josh asked for directly
+   after "Roofing" and before the existing "Firestopping" entry, which is
+   left exactly where it already sits. Case-insensitive duplicate check so
+   a phase a chat already added isn't doubled up; whichever of the five are
+   genuinely missing are inserted together right after Roofing (or at the
+   end if Roofing itself isn't found, which shouldn't happen on real data).
+   Also seeds a default 3-day phaseDurations entry for each of the five,
+   same as migratePlaybookSeed_v1 below does for every other linear phase,
+   so projection has something to work with the moment a unit reaches one. */
+async function migrateAddRoughInPhasesToSequence_v1(){
+  const done = await sget('migrated_phase_sequence_roughins_v1', false);
+  if(done) return;
+  const toInsert = ['IPD','Plumbing Rough-in','HVAC Rough-in','Gas Rough-in','Electrical Rough-in'];
+  const seq = Array.isArray(state.phaseSequence) ? state.phaseSequence.slice() : [];
+  const lowerSet = new Set(seq.map(p=>String(p).toLowerCase()));
+  const missing = toInsert.filter(p=>!lowerSet.has(p.toLowerCase()));
+  if(missing.length){
+    const roofingIdx = seq.findIndex(p=>String(p).toLowerCase()==='roofing');
+    const insertAt = roofingIdx>=0 ? roofingIdx+1 : seq.length;
+    seq.splice(insertAt, 0, ...missing);
+    state.phaseSequence = seq;
+    await sset('phaseSequence', state.phaseSequence);
+  }
+  for(const p of toInsert){
+    if(state.phaseDurations[p]===undefined) state.phaseDurations[p] = 3;
+  }
+  await sset('phaseDurations', state.phaseDurations);
+  await sset('migrated_phase_sequence_roughins_v1', true);
+}
+
+/* phaseSequence entries from "Possession" backward are the linear build
+   track the projection engine runs over; everything after Possession
+   (Siding, Exterior Stone, ... Rough Grading and Parging per the spec) is
+   the parallel exterior track, which runs alongside the linear track
+   rather than after it and is deliberately excluded here. Falls back to
+   the full list if "Possession" isn't found, so nothing silently breaks
+   if that entry is ever renamed via a connected chat. */
+function playbookLinearPhases(){
+  const seq = Array.isArray(state.phaseSequence) ? state.phaseSequence.filter(p=>typeof p==='string' && p.trim()) : [];
+  const idx = seq.findIndex(p=>p.trim().toLowerCase()==='possession');
+  return idx>=0 ? seq.slice(0, idx+1) : seq.slice();
+}
+
+/* One-time seed of the playbook rule library from PLAYBOOK_SEED (above),
+   plus a starting 3-day phaseDurations default for every phase in the
+   linear track - Josh tunes individual durations afterward from the
+   Playbook editor or a connected chat; this never overwrites a duration
+   already set (by this migration's own earlier run, or by Josh/chat).
+   Must run after migrateAddRoughInPhasesToSequence_v1 so the five new
+   rough-in phases are already in phaseSequence and get a default too. */
+async function migratePlaybookSeed_v1(){
+  const done = await sget('migrated_playbook_seed_v1', false);
+  if(done) return;
+  if(!Array.isArray(state.playbook) || state.playbook.length===0){
+    state.playbook = PLAYBOOK_SEED.map(r=>({...r}));
+    await sset('playbook', state.playbook);
+  }
+  let changed = false;
+  for(const phase of playbookLinearPhases()){
+    if(state.phaseDurations[phase]===undefined){ state.phaseDurations[phase] = 3; changed = true; }
+  }
+  if(changed) await sset('phaseDurations', state.phaseDurations);
+  await sset('migrated_playbook_seed_v1', true);
+}
+
+/* Projects a unit's remaining linear-track phases forward from its
+   logged ctEnd, using phaseDurations + playbookSettings.bufferDays.
+   Calendar days only in v1 - no weekend-skipping (a later option, see
+   README change log). Returns null if the unit's currentPhase isn't in
+   the linear track (exterior-track or unrecognized phases aren't
+   projectable) or ctEnd isn't set yet (nothing to project from). The
+   first entry is the unit's own current phase, end-dated at its real
+   ctEnd rather than a guess; every entry after that is a projection. */
+function projectUnitPhases(unit){
+  if(!unit || !unit.ctEnd) return null;
+  const linear = playbookLinearPhases();
+  const idx = linear.findIndex(p=>p.toLowerCase()===String(unit.currentPhase||'').trim().toLowerCase());
+  if(idx<0) return null;
+  const bufferDays = (state.playbookSettings && state.playbookSettings.bufferDays) || 0;
+  const out = [{phase: linear[idx], start: null, end: unit.ctEnd}];
+  let prevEnd = unit.ctEnd;
+  for(let i=idx+1; i<linear.length; i++){
+    const phase = linear[i];
+    const duration = (state.phaseDurations && state.phaseDurations[phase]) || 3;
+    const start = addDays(prevEnd, bufferDays);
+    const end = addDays(start, duration);
+    out.push({phase, start, end});
+    prevEnd = end;
+  }
+  return out;
+}
+
+/* season is checked against the anchor date's own month (not today's) -
+   a rule anchored three months out in winter should fire as a winter
+   rule even if today is mid-summer. */
+function playbookRuleSeasonMatches(rule, anchorDate){
+  if(!rule.season || rule.season==='all') return true;
+  const month = Number(anchorDate.slice(5,7));
+  const winterMonths = (state.playbookSettings && state.playbookSettings.winterMonths) || [11,12,1,2,3];
+  const isWinter = winterMonths.includes(month);
+  return rule.season==='winter' ? isWinter : !isWinter;
+}
+function playbookRuleProjectMatches(rule, unit){
+  if(!Array.isArray(rule.projects) || rule.projects.includes('all')) return true;
+  return rule.projects.includes(unit.project);
+}
+function playbookPriorityFromCost(cost){
+  return cost==='high' ? 'High' : cost==='low' ? 'Low' : 'Medium';
+}
+function playbookDueType(rule){
+  return (rule.gate || rule.cost==='high') ? 'fixed' : 'flexible';
+}
+
+/* One task per (ruleId, unitId), matched via the task's own source field
+   rather than description text so Josh can freely reword a fired task
+   without breaking the link. Moves the due date of an existing OPEN task
+   when ctEnd shifts the projection; never duplicates; never touches a
+   task Josh has already marked Done. Returns true if state.defs changed,
+   so the caller only writes to Supabase when something actually did. */
+function upsertPlaybookTask(rule, unit, dueDate, late){
+  const existing = state.defs.find(d=>d.source && d.source.ruleId===rule.id && d.source.unitId===unit.id);
+  if(existing){
+    if(existing.status==='Done') return false;
+    if(existing.dueDate===dueDate) return false;
+    existing.dueDate = dueDate;
+    return true;
+  }
+  const noteParts = [];
+  if(rule.hiddenBy) noteParts.push(`Covered by ${rule.hiddenBy}`);
+  if(rule.chain) noteParts.push(`Chain: ${rule.chain}`);
+  if(late) noteParts.push('Was due on an earlier date that already passed; moved to today');
+  state.defs.push({
+    id: uid(), location: unit.name, description: rule.text, category: 'Construction',
+    owner: 'Josh', dueDate, dueType: playbookDueType(rule), priority: playbookPriorityFromCost(rule.cost),
+    effortTier: 'quick', estimatedMinutes: 10,
+    status: 'DO', pushCount: 0, deferCount: 0, pushReason: '', createdDate: todayISO(),
+    verifier: null, followUpDate: null, startedAt: null,
+    notes: noteParts.length ? [{ts: todayISO(), text: noteParts.join(' — '), source: 'playbook_engine'}] : [],
+    source: { ruleId: rule.id, unitId: unit.id }
+  });
+  return true;
+}
+
+/* Shared by runPlaybookEngine (writes tasks) and the Look-Ahead screen's
+   real + what-if views (read-only - takes a plain unit-shaped object, so
+   a what-if preview can pass a cloned unit with a hypothetical ctEnd
+   without touching state.units at all). Returns null if the unit can't be
+   projected (see projectUnitPhases), else an array of
+   {rule, dueDate, late} for every rule that fires within
+   playbookSettings.lookaheadDays. A rule is eligible for a unit when its
+   phase is strictly ahead of the unit's current phase, OR is the current
+   phase itself with anchor:'end' (the one current-phase date we actually
+   have — ctEnd; there's no stored "phase start" to anchor a current-
+   phase 'start' rule to, so those are skipped until the unit moves into
+   that phase for real). triggerDate = anchorDate + offsetDays, marked
+   late (due today instead of the stale date) if it's already passed. */
+function firePlaybookRulesForUnit(unit){
+  const projection = projectUnitPhases(unit);
+  if(!projection) return null;
+  const linear = playbookLinearPhases();
+  const currentIdx = linear.findIndex(p=>p.toLowerCase()===String(unit.currentPhase||'').trim().toLowerCase());
+  if(currentIdx<0) return null;
+  const settings = state.playbookSettings || {lookaheadDays:14, winterMonths:[11,12,1,2,3], bufferDays:0};
+  const lookaheadDays = settings.lookaheadDays || 14;
+  const today = todayISO();
+  const horizon = addDays(today, lookaheadDays);
+  const fired = [];
+  for(const rule of state.playbook){
+    if(!rule.active) continue;
+    if(!playbookRuleProjectMatches(rule, unit)) continue;
+    const ruleIdx = linear.findIndex(p=>p.toLowerCase()===String(rule.phase||'').trim().toLowerCase());
+    if(ruleIdx<0) continue;
+    const eligible = ruleIdx>currentIdx || (ruleIdx===currentIdx && rule.anchor==='end');
+    if(!eligible) continue;
+    const entry = projection.find(e=>e.phase.toLowerCase()===String(rule.phase).trim().toLowerCase());
+    if(!entry) continue;
+    const anchorDate = rule.anchor==='start' ? entry.start : entry.end;
+    if(!anchorDate) continue;
+    if(!playbookRuleSeasonMatches(rule, anchorDate)) continue;
+
+    let triggerDate = addDays(anchorDate, rule.offsetDays||0);
+    let late = false;
+    if(triggerDate < today){ late = true; triggerDate = today; }
+    if(triggerDate > horizon) continue;
+    fired.push({ rule, dueDate: triggerDate, late });
+  }
+  return fired;
+}
+
+/* The engine's core run - called on app load and again whenever a unit's
+   phase or ctEnd changes (see openRoundModal's save in render.js). Turns
+   every rule firePlaybookRulesForUnit() returns, for every active unit,
+   into a real task via upsertPlaybookTask. Entirely additive: deactivating
+   a rule or a unit moving past its trigger never deletes or completes
+   anything the engine already created — that stays Josh's own call. */
+async function runPlaybookEngine(){
+  let changed = false;
+  for(const unit of state.units){
+    if(!unit.active) continue;
+    const fired = firePlaybookRulesForUnit(unit);
+    if(!fired) continue;
+    for(const {rule, dueDate, late} of fired){
+      if(upsertPlaybookTask(rule, unit, dueDate, late)) changed = true;
+    }
+  }
+  if(changed) await sset('defs', state.defs);
+}
+
+/* Buckets a unit's fired rules for the Look-Ahead screen (render.js):
+   Book now (type book, plus every gate — these need action booked/
+   confirmed, not just watched), Check before it's covered (has hiddenBy,
+   sorted cost-first so the most consequential miss sorts to the top),
+   Coming up (everything else in the lookahead window). A rule that's
+   both type:'book'/gate AND has hiddenBy lands in Book now - matches the
+   spec's bucket list order, most actionable first. Takes the same
+   unit-shaped input as firePlaybookRulesForUnit, so it doubles as the
+   what-if preview's bucketing with no extra code. */
+function playbookBucketsForUnit(unit){
+  const fired = firePlaybookRulesForUnit(unit);
+  if(!fired) return null;
+  const bookNow = [], checkBeforeCovered = [], comingUp = [];
+  for(const f of fired){
+    if(f.rule.type==='book' || f.rule.gate) bookNow.push(f);
+    else if(f.rule.hiddenBy) checkBeforeCovered.push(f);
+    else comingUp.push(f);
+  }
+  const costOrder = {high:0, medium:1, low:2};
+  checkBeforeCovered.sort((a,b)=>(costOrder[a.rule.cost]??1)-(costOrder[b.rule.cost]??1));
+  bookNow.sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  comingUp.sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  return {bookNow, checkBeforeCovered, comingUp};
+}
+
+/* Week-view hook (no UI yet) - exposes each active unit's projected
+   phase transitions so a future planned-week-overload pass can flag two
+   units hitting the same transition in the same week. Returns
+   {unitId, unitName, phase, start, end} rows only for phases still ahead
+   (skips the unit's own current-phase row, which isn't a transition). */
+function playbookProjectedTransitions(){
+  const rows = [];
+  for(const unit of state.units){
+    if(!unit.active) continue;
+    const projection = projectUnitPhases(unit);
+    if(!projection) continue;
+    for(const entry of projection.slice(1)){
+      rows.push({ unitId: unit.id, unitName: unit.name, phase: entry.phase, start: entry.start, end: entry.end });
+    }
+  }
+  return rows;
 }
 
 /* Loads Josh's "By Phase" rebuild (22 broad QC groups, replacing the empty
