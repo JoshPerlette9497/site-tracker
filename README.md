@@ -332,6 +332,13 @@ Added a third small migration (`migrateRemoveDuplicateIpdItem_v1`) that removes 
 4. Open the Playbook editor from the Sync tab, edit or deactivate a rule, add a new one, and adjust a phase duration — confirm it's reflected back in Look-Ahead.
 5. Ask a connected Claude chat to read `playbook`/`phaseDurations`/`playbookSettings` directly and confirm they're readable as described.
 
+**Follow-up: the three `needsInput` rules filled in with real numbers.** Josh gave the real values for the three rules that launched as placeholders:
+- **Over-dig clearance** (pb_003): 24".
+- **Sewer line inspection lead time** (pb_004): 1-2 business days.
+- **Metal roof duration** (pb_009): ~10 days total (3 days prep + 4 days base + 3 days to finish the metal panels), vs. ~7 days for a standard shingle roof.
+
+Added via a small one-time migration (`migratePlaybookFillInputs_v1`, the same "small patch" pattern used throughout this file) that matches each rule by id and only rewrites it if its text still equals the exact original placeholder wording — so if Josh has already hand-edited any of these three himself, this migration leaves his version alone rather than overwriting it. Also updated the seed so a fresh install starts with the real numbers already in place. Note on pb_009: the real metal-roof duration is a *per-unit* override, not a global default — `phaseDurations.Roofing` is a single flat value shared by every unit regardless of roof type, so this migration doesn't touch it; the rule text itself now tells Josh to set that unit's Roofing duration in the Playbook editor when it's a metal-roof build. Verified against a copy of the real live `playbook` data: all three rules update correctly and lose their `needsInput` flag, every other rule is untouched, running it twice is a no-op, and a rule Josh has already edited himself is correctly left alone.
+
 ## Safety walkthrough photo storage (one-time setup required)
 The daily Safety Walkthrough feature (Brief tab) uploads per-checklist-item
 photos to a Supabase Storage bucket named `hazard-photos` (`js/storage.js`:
