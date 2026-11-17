@@ -105,10 +105,15 @@ h2{font-size:15px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)
 .cambox .ct{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:linear-gradient(#000a,#0000)}
 .cambox .ct b{flex:1;color:#fff;font-size:20px}
 .cambox .ct .btn{background:#222;color:#fff;border-color:#666}
-.cambox .cb{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:18px;padding:16px 12px calc(20px + env(safe-area-inset-bottom));background:linear-gradient(#0000,#000a)}
+.cambox .cb{position:absolute;bottom:0;left:0;right:0;display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:16px 12px calc(20px + env(safe-area-inset-bottom));background:linear-gradient(#0000,#000a)}
 .cambox .cb .btn{background:#222;color:#fff;border-color:#666;width:112px;flex:none}
 .shutter{flex:none;width:84px;height:84px;border-radius:50%;border:6px solid #fff;background:#ffffff33;padding:0;cursor:pointer}
 .shutter:active,.shutter.pressed{background:#fff;transform:scale(.92)}
+.cambox .cbrow{display:flex;align-items:center;justify-content:center;gap:18px}
+.cambox .cap{display:flex;gap:8px;align-items:stretch}
+.cambox .cap img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:2px solid #fff;flex:none;background:#333}
+.cambox .cap textarea{flex:1;min-height:56px;max-height:56px;margin:0;padding:8px 10px;background:#fffffff0;color:#000;border:2px solid #fff;border-radius:10px;resize:none}
+.cambox .cap textarea:disabled{opacity:.6}
 .cambox .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
 .qcount{font-size:28px;font-weight:800}
 .qsel{width:28px;height:28px}
@@ -820,9 +825,16 @@ async function startBurst() {
   const box = document.createElement('div'); box.className = 'cambox'; box.id = 'cambox';
   box.innerHTML = `<video playsinline muted autoplay></video><div class="flash"></div>
     <div class="ct"><b id="camCount">0 taken</b><button class="btn" data-cam="done">Done</button></div>
-    <div class="cb"><button class="btn" data-cam="native">Phone camera</button><button class="shutter" data-cam="shot" aria-label="Take photo"></button><span style="width:112px;flex:none"></span></div>`;
+    <div class="cb"><div class="cap"><img id="camThumb" alt="" hidden><textarea id="camText" rows="2" disabled placeholder="Take a photo, then type or dictate what it is…"></textarea></div>
+      <div class="cbrow"><button class="btn" data-cam="native">Phone camera</button><button class="shutter" data-cam="shot" aria-label="Take photo"></button><span style="width:112px;flex:none"></span></div></div>`;
   document.body.appendChild(box);
-  burst = {box, video:box.querySelector('video'), stream:null, taken:0, chain:Promise.resolve()};
+  burst = {box, video:box.querySelector('video'), stream:null, taken:0, chain:Promise.resolve(), last:null};
+  const txt = box.querySelector('#camText');
+  txt.addEventListener('input', () => { if (burst && burst.last) { burst.last.text = txt.value; queueSave(); } });
+  if (window.visualViewport) {                       // keep the controls above the on-screen keyboard
+    const fit = () => { if (!burst) return; const vv = window.visualViewport; box.style.height = vv.height + 'px'; box.style.top = vv.offsetTop + 'px'; box.style.bottom = 'auto'; };
+    window.visualViewport.addEventListener('resize', fit); window.visualViewport.addEventListener('scroll', fit); burst.fit = fit; fit();
+  }
   box.onclick = e => {
     const a = e.target.closest('[data-cam]'); if (!a) return;
     if (a.dataset.cam === 'shot') burstShot(); else if (a.dataset.cam === 'done') stopBurst(); else ACT.qNative();
@@ -841,13 +853,16 @@ function burstShot() {
   c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);          // grab the frame now; encode/save in the background
   const f = b.box.querySelector('.flash'); f.style.transition = 'none'; f.style.opacity = '.7'; requestAnimationFrame(() => { f.style.transition = 'opacity .25s'; f.style.opacity = '0'; });
   b.taken++; $('#camCount').textContent = b.taken + ' taken';
+  const qi = newQuickItem(); cur.quick.push(qi); b.last = qi;       // the description box now belongs to this photo
+  const txt = $('#camText'); txt.value = ''; txt.disabled = false; txt.placeholder = 'Describe this photo (optional)…';
+  const th = $('#camThumb'); th.hidden = false;
   b.chain = b.chain.then(async () => {
     try {
       const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.75)); if (!blob) throw new Error('Could not encode photo');
-      const qi = newQuickItem(); cur.quick.push(qi);
       const p = {id:uid(), inspectionId:cur.id, itemId:qi.id, blob, createdAt:Date.now()};
       await dbPut('photos', p); qi.photoIds.push(p.id);
       photoCache.set(p.id, {...p, url:URL.createObjectURL(blob)});
+      if (b.last === qi) th.src = photoCache.get(p.id).url;
       await saveNow();
     } catch (err) { storageFail(err); }
   });
@@ -855,6 +870,7 @@ function burstShot() {
 async function stopBurst() {
   const b = burst; if (!b) return; burst = null;
   try { await b.chain; } catch (_) {}
+  await flush();                                        // saves any description typed after the last shot
   if (b.stream) b.stream.getTracks().forEach(t => t.stop());
   b.box.remove();
   if (b.taken) { toast(b.taken + ' photo' + (b.taken === 1 ? '' : 's') + ' saved as items'); render(); }
